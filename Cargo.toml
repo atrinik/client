@@ -29,7 +29,7 @@ atrinik-session = { path = "crates/atrinik-session", version = "=0.1.0" }
 atrinik-testkit = { path = "crates/atrinik-testkit", version = "=0.1.0" }
 atrinik-ui-model = { path = "crates/atrinik-ui-model", version = "=0.1.0" }
 sdl3 = { version = "=0.18.4", default-features = false, features = ["build-from-source-static"] }
-sha2 = "=0.10.9"
+sha2 = "=0.11.0"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
