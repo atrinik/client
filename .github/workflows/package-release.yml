@@ -43,6 +43,10 @@ jobs:
             exit 1
           fi
           sha=$(git rev-parse --verify "${tag}^{commit}")
+          if ! git merge-base --is-ancestor "${sha}" origin/main; then
+            echo "Release tag is not reachable from the protected main branch." >&2
+            exit 1
+          fi
           if [[ -n ${WORKFLOW_SHA} && ${sha} != "${WORKFLOW_SHA}" ]]; then
             echo "Release tag does not point at the completed workflow revision." >&2
             exit 1
@@ -134,7 +138,12 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release upload "${RELEASE_TAG}" dist/* --clobber
+            assets=$(gh release view "${RELEASE_TAG}" --json assets --jq '.assets | length')
+            if [[ ${assets} -ne 0 ]]; then
+              echo "Refusing to replace assets on an existing release." >&2
+              exit 1
+            fi
+            gh release upload "${RELEASE_TAG}" dist/*
           else
             gh release create "${RELEASE_TAG}" dist/* --verify-tag --generate-notes
           fi
