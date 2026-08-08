@@ -1,0 +1,27 @@
+name: Semantic Release
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+concurrency:
+  group: client-semantic-release
+  cancel-in-progress: false
+jobs:
+  release:
+    name: Release client source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          npx --yes --package=semantic-release@25.0.9
+          --package=conventional-changelog-conventionalcommits@9.3.1
+          semantic-release

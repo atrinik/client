@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "assets": [],
+  "rule": "Packaging fails for every bundled asset absent from this exact author/source/license/digest/notice allowlist. M1 bundles no authored assets."
+}

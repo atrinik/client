@@ -1,0 +1,83 @@
+name: Package Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  linux:
+    name: Linux release package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Linux native build dependencies
+        run: tools/install-linux-native-deps.sh
+      - name: Install pinned toolchain and Syft
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal
+          install -d "${RUNNER_TEMP}/bin"
+          curl --fail --silent --show-error --location https://github.com/rust-secure-code/cargo-auditable/releases/download/v0.7.5/cargo-auditable-x86_64-unknown-linux-gnu.tar.xz --output "${RUNNER_TEMP}/cargo-auditable.tar.xz"
+          printf '%s  %s\n' 322eda09f24e5dba97371c6c2c6949569c411ddf893852e88135cc5b51d5a719 "${RUNNER_TEMP}/cargo-auditable.tar.xz" | sha256sum --check --strict
+          tar -xJf "${RUNNER_TEMP}/cargo-auditable.tar.xz" -C "${RUNNER_TEMP}/bin" --strip-components=1 cargo-auditable-x86_64-unknown-linux-gnu/cargo-auditable
+          curl --fail --silent --show-error --location https://github.com/anchore/syft/releases/download/v1.50.0/syft_1.50.0_linux_amd64.tar.gz --output "${RUNNER_TEMP}/syft.tar.gz"
+          printf '%s  %s\n' bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788 "${RUNNER_TEMP}/syft.tar.gz" | sha256sum --check --strict
+          tar -xzf "${RUNNER_TEMP}/syft.tar.gz" -C "${RUNNER_TEMP}/bin" syft
+          echo "${RUNNER_TEMP}/bin" >>"${GITHUB_PATH}"
+      - name: Build immutable package
+        run: |
+          tools/package-linux.sh dist "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    name: Windows release package
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Install pinned Syft
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/anchore/syft/releases/download/v1.50.0/syft_1.50.0_windows_amd64.zip -OutFile "$env:RUNNER_TEMP/syft.zip"
+          if ((Get-FileHash -Algorithm SHA256 "$env:RUNNER_TEMP/syft.zip").Hash.ToLowerInvariant() -ne "815ee6973ec5dff6a671d7f41b0e78835a8c45b91d5a39f4743ea1cee833d3be") { throw "Syft digest mismatch" }
+          Expand-Archive "$env:RUNNER_TEMP/syft.zip" "$env:RUNNER_TEMP/syft"
+          "$env:RUNNER_TEMP/syft" | Out-File -FilePath $env:GITHUB_PATH -Append
+          Invoke-WebRequest https://github.com/rust-secure-code/cargo-auditable/releases/download/v0.7.5/cargo-auditable-x86_64-pc-windows-msvc.zip -OutFile "$env:RUNNER_TEMP/cargo-auditable.zip"
+          if ((Get-FileHash -Algorithm SHA256 "$env:RUNNER_TEMP/cargo-auditable.zip").Hash.ToLowerInvariant() -ne "83a7d5955c7ac96ede5d896ac9ede5f7ecce9ece0e95d9e47acd766b09e2ef1b") { throw "cargo-auditable digest mismatch" }
+          Expand-Archive "$env:RUNNER_TEMP/cargo-auditable.zip" "$env:RUNNER_TEMP/cargo-auditable"
+          "$env:RUNNER_TEMP/cargo-auditable" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Build immutable package
+        shell: pwsh
+        run: |
+          tools/package-windows.ps1 -Output dist -Version $env:GITHUB_REF_NAME.TrimStart('v')
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish complete release
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Upload only after both platforms pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in {1..12}; do gh release view "${GITHUB_REF_NAME}" && break; test "${attempt}" -eq 12 && exit 1; sleep 5; done
+          gh release upload "${GITHUB_REF_NAME}" dist/*

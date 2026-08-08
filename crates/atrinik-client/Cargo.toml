@@ -1,0 +1,18 @@
+[package]
+name = "atrinik-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+atrinik-config-cache.workspace = true
+atrinik-platform.workspace = true
+atrinik-protocol-adapter.workspace = true
+atrinik-scene-adapter.workspace = true
+atrinik-session.workspace = true
+atrinik-ui-model.workspace = true
+
+[lints]
+workspace = true
