@@ -46,6 +46,12 @@ Run `tools/validate.sh` for formatting, Clippy-as-errors, tests, architecture,
 provenance/parity, dependency/license/advisory, native-library, release, SBOM,
 and reproducibility gates.
 
+Semantic-release creates an immutable version tag from `main` without exposing
+a partial GitHub release. A completion-triggered workflow resolves that exact
+tag and commit, builds Linux and Windows independently, and creates the release
+only after both packages pass. Manual dispatch can idempotently repair an
+existing tagged release without rebuilding from another revision.
+
 ## Supported M1 platform matrix
 
 | Target | SDL3 | Window validation | Renderer backend |
