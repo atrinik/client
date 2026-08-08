@@ -24,9 +24,10 @@
 - The SDL3 platform layer owns windows, application events, input devices,
   text/IME, clipboard, notifications, clocks, and audio-device lifecycle. Turn
   raw input into semantic input before product behavior consumes it.
-- Never depend on `atrinik/editor`, `atrinik/content-toolkit`, a legacy
-  repository, or write-capable authoring code. The editor must never depend on
-  client application/session state either.
+- Never depend on `atrinik/editor`, `atrinik/content-toolkit`,
+  `atrinik/classic`, an archived predecessor repository, or write-capable
+  authoring code. The editor must never depend on client application/session
+  state either.
 
 ## Architecture and safety
 
@@ -71,7 +72,8 @@
   stable M2/M3 contracts; it must not introduce editor coupling or a second
   renderer.
 - M5 burns the behavior-parity matrix to zero and migrates the preserved world
-  and gameplay presentation without importing legacy implementation structure.
+  and gameplay presentation without importing classic implementation
+  structure.
 - M6 owns fuzz/soak/recovery gates, Linux/Windows packaging, compatibility,
   and cutover evidence. Do not call the replacement complete while a required
   parity row is unowned, unverified, or ambiguously excluded.
@@ -84,9 +86,9 @@
 
 - New source, tests, documentation, and client-specific fixtures in this
   repository are MIT. Do not add GPL/AGPL code dependencies or adapt source,
-  tests, comments, or internal structure from a legacy Atrinik repository by
-  default. Public behavior and preserved product specifications may be used
-  for an independent implementation.
+  tests, comments, or internal structure from `atrinik/classic` or an archived
+  predecessor repository by default. Public behavior and preserved product
+  specifications may be used for an independent implementation.
 - Historical reuse is allowed only for a person and scope present in the
   exhaustive approved-grantor registry in the current `atrinik/atrinik`
   `AGENTS.md`. Apply its complete-history, identity, separability,
@@ -136,7 +138,7 @@
   packages. Release inputs include pinned renderer/protocol compatibility,
   exact allowlisted assets, licenses/notices, checksums, SBOM, provenance, and
   crash-symbol policy; packages must not require Rust, Python, source
-  checkouts, editor/toolkit code, or legacy libraries at runtime.
+  checkouts, editor/toolkit code, or classic libraries at runtime.
 - Pull-request titles and squash commits use Conventional Commits. Every squash
   merge is released by semantic-release; do not create release tags manually
   or couple a release to wrapper/submodule commits.
