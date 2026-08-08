@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "id": "behavior:semantic-navigation-parity",
+      "source": "public requirement atrinik/client#4 and #15",
+      "source_paths": [],
+      "history_range": null,
+      "method": "behavior-only independent reimplementation",
+      "destination_paths": ["crates/atrinik-actions/src/lib.rs", "crates/atrinik-platform/src/lib.rs"],
+      "grant_used": false,
+      "third_party_review": "No source, test, fixture, or asset was copied; synthetic enum-level tests only.",
+      "status": "migrated"
+    },
+    {
+      "id": "excluded:classic-texture-tree",
+      "source": "atrinik/classic client media and historical texture trees",
+      "source_paths": ["client/media", "client/textures"],
+      "history_range": null,
+      "method": "exclusion",
+      "destination_paths": [],
+      "grant_used": false,
+      "third_party_review": "No complete file-level authorship, derivative, base-license, or conflicting-notice audit was performed.",
+      "status": "excluded"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+[package]
+name = "atrinik-protocol-adapter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+atrinik-actions.workspace = true
+atrinik-session.workspace = true
+
+[lints]
+workspace = true

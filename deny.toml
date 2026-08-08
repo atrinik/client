@@ -1,0 +1,30 @@
+[graph]
+all-features = true
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[licenses]
+allow = ["Apache-2.0", "MIT", "Zlib"]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+deny = [
+  { name = "cpython" },
+  { name = "pyo3" },
+  { name = "openssl" },
+  { name = "openssl-sys" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

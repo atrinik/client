@@ -1,0 +1,18 @@
+[package]
+name = "atrinik-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["sdl-runtime"]
+sdl-runtime = ["dep:sdl3"]
+
+[dependencies]
+atrinik-actions.workspace = true
+sdl3 = { workspace = true, optional = true }
+
+[lints]
+workspace = true
