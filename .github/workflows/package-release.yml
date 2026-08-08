@@ -1,19 +1,67 @@
 name: Package Release
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: [Semantic Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vMAJOR.MINOR.PATCH tag to package or repair
+        required: true
+        type: string
 permissions:
   contents: read
+concurrency:
+  group: client-package-${{ inputs.tag || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
 jobs:
+  prepare:
+    name: Resolve immutable release tag
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: release
+        name: Resolve tag to exact commit
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          WORKFLOW_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          tag=${REQUESTED_TAG}
+          if [[ -z ${tag} ]]; then
+            tag=$(git tag --points-at "${WORKFLOW_SHA}" --list 'v*' \
+              --sort=-version:refname | head -n 1)
+          fi
+          if [[ ! ${tag} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "No exact semantic-release tag was found." >&2
+            exit 1
+          fi
+          sha=$(git rev-parse --verify "${tag}^{commit}")
+          if [[ -n ${WORKFLOW_SHA} && ${sha} != "${WORKFLOW_SHA}" ]]; then
+            echo "Release tag does not point at the completed workflow revision." >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >>"${GITHUB_OUTPUT}"
+          echo "sha=${sha}" >>"${GITHUB_OUTPUT}"
+
   linux:
     name: Linux release package
+    needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - name: Install Linux native build dependencies
         run: tools/install-linux-native-deps.sh
-      - name: Install pinned toolchain and Syft
+      - name: Install pinned toolchain and SBOM tools
         run: |
           rustup toolchain install 1.97.1 --profile minimal
           install -d "${RUNNER_TEMP}/bin"
@@ -25,8 +73,9 @@ jobs:
           tar -xzf "${RUNNER_TEMP}/syft.tar.gz" -C "${RUNNER_TEMP}/bin" syft
           echo "${RUNNER_TEMP}/bin" >>"${GITHUB_PATH}"
       - name: Build immutable package
-        run: |
-          tools/package-linux.sh dist "${GITHUB_REF_NAME#v}"
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: tools/package-linux.sh dist "${RELEASE_TAG#v}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-release
@@ -36,12 +85,15 @@ jobs:
 
   windows:
     name: Windows release package
+    needs: prepare
     runs-on: windows-2025
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
       - run: rustup toolchain install 1.97.1 --profile minimal
-      - name: Install pinned Syft
+      - name: Install pinned SBOM tools
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/anchore/syft/releases/download/v1.50.0/syft_1.50.0_windows_amd64.zip -OutFile "$env:RUNNER_TEMP/syft.zip"
@@ -54,8 +106,9 @@ jobs:
           "$env:RUNNER_TEMP/cargo-auditable" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Build immutable package
         shell: pwsh
-        run: |
-          tools/package-windows.ps1 -Output dist -Version $env:GITHUB_REF_NAME.TrimStart('v')
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: tools/package-windows.ps1 -Output dist -Version $env:RELEASE_TAG.TrimStart('v')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-release
@@ -65,7 +118,7 @@ jobs:
 
   publish:
     name: Publish complete release
-    needs: [linux, windows]
+    needs: [prepare, linux, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     permissions:
@@ -75,9 +128,13 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Upload only after both platforms pass
+      - name: Create or repair release only after both platforms pass
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          for attempt in {1..12}; do gh release view "${GITHUB_REF_NAME}" && break; test "${attempt}" -eq 12 && exit 1; sleep 5; done
-          gh release upload "${GITHUB_REF_NAME}" dist/*
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" dist/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" dist/* --verify-tag --generate-notes
+          fi
