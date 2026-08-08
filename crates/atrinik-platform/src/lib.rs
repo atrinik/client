@@ -2,7 +2,7 @@
 //! SDL3 ownership boundary and deterministic headless substitutes.
 
 use atrinik_actions::{Direction, SemanticInput};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
@@ -57,6 +57,8 @@ pub enum PlatformError {
     InvalidDimensions,
     InvalidScale,
     InvalidTransition,
+    InvalidCapacity,
+    EventQueueFull,
     Native(String),
 }
 impl Display for PlatformError {
@@ -65,6 +67,10 @@ impl Display for PlatformError {
             Self::InvalidDimensions => f.write_str("logical window dimensions are invalid"),
             Self::InvalidScale => f.write_str("display scale is invalid"),
             Self::InvalidTransition => f.write_str("platform lifecycle transition is invalid"),
+            Self::InvalidCapacity => {
+                f.write_str("platform event capacity is outside supported bounds")
+            }
+            Self::EventQueueFull => f.write_str("platform event queue is full"),
             Self::Native(message) => write!(f, "SDL3 platform error: {message}"),
         }
     }
@@ -85,6 +91,87 @@ pub trait AudioDevice {
         volume_milli: u16,
     ) -> Result<(), PlatformError>;
     fn connected(&self) -> bool;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HeadlessClock {
+    elapsed: Duration,
+}
+impl HeadlessClock {
+    pub fn advance(&mut self, delta: Duration) -> Result<(), PlatformError> {
+        if delta > Duration::from_hours(24) {
+            return Err(PlatformError::InvalidTransition);
+        }
+        self.elapsed = self
+            .elapsed
+            .checked_add(delta)
+            .ok_or(PlatformError::InvalidTransition)?;
+        Ok(())
+    }
+}
+impl MonotonicClock for HeadlessClock {
+    fn elapsed(&self) -> Duration {
+        self.elapsed
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct HeadlessClipboard {
+    text: String,
+}
+impl Clipboard for HeadlessClipboard {
+    fn read_text(&self) -> Result<String, PlatformError> {
+        Ok(self.text.clone())
+    }
+    fn write_text(&mut self, value: &str) -> Result<(), PlatformError> {
+        if value.len() > 1_048_576 || value.contains('\0') {
+            return Err(PlatformError::InvalidTransition);
+        }
+        self.text.clear();
+        self.text.push_str(value);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessAudio {
+    connected: bool,
+    volumes: BTreeMap<AudioCategory, u16>,
+}
+impl Default for HeadlessAudio {
+    fn default() -> Self {
+        Self {
+            connected: true,
+            volumes: BTreeMap::new(),
+        }
+    }
+}
+impl HeadlessAudio {
+    pub fn lose(&mut self) {
+        self.connected = false;
+    }
+    pub fn restore(&mut self) {
+        self.connected = true;
+    }
+    pub fn volume(&self, category: AudioCategory) -> u16 {
+        self.volumes.get(&category).copied().unwrap_or(1_000)
+    }
+}
+impl AudioDevice for HeadlessAudio {
+    fn set_category_volume(
+        &mut self,
+        category: AudioCategory,
+        volume_milli: u16,
+    ) -> Result<(), PlatformError> {
+        if !self.connected || volume_milli > 1_000 {
+            return Err(PlatformError::InvalidTransition);
+        }
+        self.volumes.insert(category, volume_milli);
+        Ok(())
+    }
+    fn connected(&self) -> bool {
+        self.connected
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -110,13 +197,36 @@ pub struct PlatformState {
     pub shutdown: bool,
 }
 
-#[derive(Default)]
 pub struct HeadlessPlatform {
     state: PlatformState,
     events: VecDeque<PlatformTransition>,
+    capacity: usize,
+}
+
+impl Default for HeadlessPlatform {
+    fn default() -> Self {
+        Self {
+            state: PlatformState::default(),
+            events: VecDeque::with_capacity(256),
+            capacity: 256,
+        }
+    }
 }
 impl HeadlessPlatform {
+    pub fn new(capacity: usize) -> Result<Self, PlatformError> {
+        if !(1..=4_096).contains(&capacity) {
+            return Err(PlatformError::InvalidCapacity);
+        }
+        Ok(Self {
+            state: PlatformState::default(),
+            events: VecDeque::with_capacity(capacity),
+            capacity,
+        })
+    }
     pub fn apply(&mut self, transition: PlatformTransition) -> Result<(), PlatformError> {
+        if self.events.len() == self.capacity {
+            return Err(PlatformError::EventQueueFull);
+        }
         match transition {
             PlatformTransition::WindowCreated if !self.state.window && !self.state.shutdown => {
                 self.state.window = true;
@@ -242,5 +352,47 @@ mod tests {
             platform.apply(PlatformTransition::WindowCreated),
             Err(PlatformError::InvalidTransition)
         );
+    }
+    #[test]
+    fn event_queue_fails_before_state_mutation() {
+        let mut platform = HeadlessPlatform::new(1).expect("capacity");
+        platform
+            .apply(PlatformTransition::WindowCreated)
+            .expect("first event");
+        let before = platform.state();
+        assert_eq!(
+            platform.apply(PlatformTransition::Fullscreen(true)),
+            Err(PlatformError::EventQueueFull)
+        );
+        assert_eq!(platform.state(), before);
+    }
+    #[test]
+    fn headless_services_enforce_time_text_audio_and_device_loss_bounds() {
+        let mut clock = HeadlessClock::default();
+        clock.advance(Duration::from_millis(5)).expect("time");
+        assert_eq!(clock.elapsed(), Duration::from_millis(5));
+        assert_eq!(
+            clock.advance(Duration::from_secs(86_401)),
+            Err(PlatformError::InvalidTransition)
+        );
+        let mut clipboard = HeadlessClipboard::default();
+        clipboard.write_text("text").expect("clipboard");
+        assert_eq!(clipboard.read_text().expect("read"), "text");
+        assert_eq!(
+            clipboard.write_text("bad\0text"),
+            Err(PlatformError::InvalidTransition)
+        );
+        let mut audio = HeadlessAudio::default();
+        audio
+            .set_category_volume(AudioCategory::Music, 500)
+            .expect("volume");
+        assert_eq!(audio.volume(AudioCategory::Music), 500);
+        audio.lose();
+        assert_eq!(
+            audio.set_category_volume(AudioCategory::Music, 400),
+            Err(PlatformError::InvalidTransition)
+        );
+        audio.restore();
+        assert!(audio.connected());
     }
 }

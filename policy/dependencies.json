@@ -14,10 +14,13 @@
   "tools": [
     {"name":"Rust","version":"1.97.1","source":"https://static.rust-lang.org","license":"Apache-2.0 OR MIT"},
     {"name":"cargo-deny","version":"0.20.2","source":"https://github.com/EmbarkStudios/cargo-deny","license":"Apache-2.0 OR MIT","linux_amd64_sha256":"9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"},
+    {"name":"cargo-auditable","version":"0.7.5","source":"https://github.com/rust-secure-code/cargo-auditable","license":"Apache-2.0 OR MIT","linux_amd64_sha256":"322eda09f24e5dba97371c6c2c6949569c411ddf893852e88135cc5b51d5a719","windows_amd64_sha256":"83a7d5955c7ac96ede5d896ac9ede5f7ecce9ece0e95d9e47acd766b09e2ef1b"},
     {"name":"Syft","version":"1.50.0","source":"https://github.com/anchore/syft","license":"Apache-2.0","linux_amd64_sha256":"bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788","windows_amd64_sha256":"815ee6973ec5dff6a671d7f41b0e78835a8c45b91d5a39f4743ea1cee833d3be"},
     {"name":"semantic-release","version":"25.0.9","source":"https://github.com/semantic-release/semantic-release","license":"MIT"}
   ],
   "actions": [
-    {"name":"actions/checkout","revision":"3d3c42e5aac5ba805825da76410c181273ba90b1","version_hint":"v7.0.1","source":"https://github.com/actions/checkout"}
+    {"name":"actions/checkout","revision":"3d3c42e5aac5ba805825da76410c181273ba90b1","version_hint":"v7.0.1","source":"https://github.com/actions/checkout"},
+    {"name":"actions/upload-artifact","revision":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version_hint":"v7.0.1","source":"https://github.com/actions/upload-artifact"},
+    {"name":"actions/download-artifact","revision":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version_hint":"v8.0.1","source":"https://github.com/actions/download-artifact"}
   ]
 }

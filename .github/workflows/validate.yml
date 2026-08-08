@@ -26,6 +26,11 @@ jobs:
           printf '%s  %s\n' 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f "${RUNNER_TEMP}/cargo-deny.tar.gz" | sha256sum --check --strict
           tar -xzf "${RUNNER_TEMP}/cargo-deny.tar.gz" -C "${RUNNER_TEMP}/tools/cargo-deny" --strip-components=1
           install "${RUNNER_TEMP}/tools/cargo-deny/cargo-deny" "${RUNNER_TEMP}/bin/cargo-deny"
+          install -d "${RUNNER_TEMP}/tools/cargo-auditable"
+          curl --fail --silent --show-error --location https://github.com/rust-secure-code/cargo-auditable/releases/download/v0.7.5/cargo-auditable-x86_64-unknown-linux-gnu.tar.xz --output "${RUNNER_TEMP}/cargo-auditable.tar.xz"
+          printf '%s  %s\n' 322eda09f24e5dba97371c6c2c6949569c411ddf893852e88135cc5b51d5a719 "${RUNNER_TEMP}/cargo-auditable.tar.xz" | sha256sum --check --strict
+          tar -xJf "${RUNNER_TEMP}/cargo-auditable.tar.xz" -C "${RUNNER_TEMP}/tools/cargo-auditable" --strip-components=1
+          install "${RUNNER_TEMP}/tools/cargo-auditable/cargo-auditable" "${RUNNER_TEMP}/bin/cargo-auditable"
           curl --fail --silent --show-error --location https://github.com/anchore/syft/releases/download/v1.50.0/syft_1.50.0_linux_amd64.tar.gz --output "${RUNNER_TEMP}/syft.tar.gz"
           printf '%s  %s\n' bf7b29ff57f06da30918266a0e1c2885a8f99784798d1bdb1628886aa015d788 "${RUNNER_TEMP}/syft.tar.gz" | sha256sum --check --strict
           tar -xzf "${RUNNER_TEMP}/syft.tar.gz" -C "${RUNNER_TEMP}/bin" syft
@@ -45,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           $env:SDL_VIDEODRIVER = "dummy"
-          cargo run --locked --quiet --package atrinik-client -- window
+          cargo run --locked --quiet --package atrinik-client -- window 8
 
   aggregate:
     name: Client validation

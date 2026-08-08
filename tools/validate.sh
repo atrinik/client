@@ -13,7 +13,7 @@ cargo deny --locked check
 tools/check-foundations.sh
 cargo run --locked --quiet --package atrinik-client -- version
 cargo run --locked --quiet --package atrinik-client -- headless
-SDL_VIDEODRIVER=dummy cargo run --locked --quiet --package atrinik-client -- window
+SDL_VIDEODRIVER=dummy cargo run --locked --quiet --package atrinik-client -- window 8
 first=$(mktemp -d /tmp/atrinik-client-release-first.XXXXXX); rmdir "${first}"
 second=$(mktemp -d /tmp/atrinik-client-release-second.XXXXXX); rmdir "${second}"
 trap 'rm -rf -- "${first}" "${second}"' EXIT

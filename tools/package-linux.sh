@@ -12,13 +12,14 @@ trap 'rm -rf -- "${stage}"' EXIT
 install -d "${output}"
 output=$(realpath "${output}")
 
-ATRINIK_RUST_VERSION=rust-1.97.1 ATRINIK_VERSION="${version}" cargo build --locked --release --package atrinik-client
+ATRINIK_RUST_VERSION=rust-1.97.1 ATRINIK_VERSION="${version}" cargo auditable build --locked --release --package atrinik-client
 cp target/release/atrinik-client LICENSE PROVENANCE.md THIRD_PARTY_NOTICES.md "${stage}/"
 strip --strip-debug "${stage}/atrinik-client"
 tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "${stage}" -cf - . | gzip -n >"${output}/atrinik-client-${version}-linux-amd64.tar.gz"
 git archive --format=tar --prefix="atrinik-client-${version}/" HEAD | gzip -n >"${output}/atrinik-client-${version}-source.tar.gz"
 SYFT_CHECK_FOR_APP_UPDATE=false syft dir:"${stage}" --source-name atrinik-client --source-version "${version}" --output "cyclonedx-json=${output}/atrinik-client-${version}-linux-amd64.sbom.cdx.json"
 if grep -Eiq 'AGPL-[123]|GPL-[123]' "${output}/atrinik-client-${version}-linux-amd64.sbom.cdx.json"; then echo "forbidden reciprocal license in SBOM" >&2; exit 1; fi
+if [[ $(jq '.components | length' "${output}/atrinik-client-${version}-linux-amd64.sbom.cdx.json") -lt 10 ]]; then echo "release SBOM is missing the effective Rust graph" >&2; exit 1; fi
 jq -n --arg version "${version}" --arg revision "${revision}" --arg rust "$(rustc --version)" '{schema_version:1,version:$version,revision:$revision,target:"x86_64-unknown-linux-gnu",rust:$rust,sdl:"3.4.14 static",protocol:"game-protocol-1",renderer:"scene-snapshot-1",symbols:"stripped; private symbol packages begin in M6"}' >"${output}/atrinik-client-${version}-linux-amd64.provenance.json"
 (
   cd "${output}"

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 //! Renderer-, protocol-, platform-, and transport-independent player intent.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -79,6 +79,8 @@ pub struct ActionRequest {
 pub struct ActionQueue {
     capacity: usize,
     requests: VecDeque<ActionRequest>,
+    correlations: BTreeSet<u64>,
+    closed: bool,
 }
 
 /// A typed local action rejection. It never claims authoritative failure.
@@ -87,6 +89,8 @@ pub enum ActionError {
     InvalidCapacity,
     Full,
     InvalidCorrelation,
+    DuplicateCorrelation,
+    Closed,
 }
 
 impl Display for ActionError {
@@ -95,6 +99,8 @@ impl Display for ActionError {
             Self::InvalidCapacity => "action queue capacity is outside supported bounds",
             Self::Full => "action queue is full",
             Self::InvalidCorrelation => "action correlation identifier is zero",
+            Self::DuplicateCorrelation => "action correlation identifier is duplicated",
+            Self::Closed => "action queue is closed",
         })
     }
 }
@@ -110,6 +116,8 @@ impl ActionQueue {
         Ok(Self {
             capacity,
             requests: VecDeque::with_capacity(capacity),
+            correlations: BTreeSet::new(),
+            closed: false,
         })
     }
 
@@ -118,21 +126,31 @@ impl ActionQueue {
         if request.id == 0 {
             return Err(ActionError::InvalidCorrelation);
         }
+        if self.closed {
+            return Err(ActionError::Closed);
+        }
+        if self.correlations.contains(&request.id) {
+            return Err(ActionError::DuplicateCorrelation);
+        }
         if self.requests.len() == self.capacity {
             return Err(ActionError::Full);
         }
+        self.correlations.insert(request.id);
         self.requests.push_back(request);
         Ok(())
     }
 
     /// Removes the oldest request.
     pub fn pop(&mut self) -> Option<ActionRequest> {
-        self.requests.pop_front()
+        let request = self.requests.pop_front()?;
+        self.correlations.remove(&request.id);
+        Some(request)
     }
 
     /// Removes all pending local intent at a lifecycle boundary.
     pub fn clear(&mut self) {
         self.requests.clear();
+        self.correlations.clear();
     }
 
     /// Returns current bounded depth.
@@ -143,6 +161,11 @@ impl ActionQueue {
     /// Reports whether no request is queued.
     pub fn is_empty(&self) -> bool {
         self.requests.is_empty()
+    }
+
+    /// Stops admission while retaining already accepted requests for draining.
+    pub fn close(&mut self) {
+        self.closed = true;
     }
 }
 
@@ -165,8 +188,20 @@ mod tests {
             action: Action::Stop,
         };
         queue.push(request.clone()).expect("first request");
-        assert_eq!(queue.push(request), Err(ActionError::Full));
+        assert_eq!(
+            queue.push(request.clone()),
+            Err(ActionError::DuplicateCorrelation)
+        );
+        assert_eq!(
+            queue.push(ActionRequest {
+                id: 2,
+                action: Action::Stop
+            }),
+            Err(ActionError::Full)
+        );
         queue.clear();
         assert!(queue.is_empty());
+        queue.close();
+        assert_eq!(queue.push(request), Err(ActionError::Closed));
     }
 }

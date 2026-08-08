@@ -8,7 +8,8 @@ use atrinik_ui_model::model;
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    match std::env::args().nth(1).as_deref() {
+    let mut arguments = std::env::args().skip(1);
+    match arguments.next().as_deref() {
         Some("version") => {
             println!(
                 "atrinik-client {} rust={} target={} protocol={} renderer={}",
@@ -22,7 +23,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Some("headless") => headless(),
         Some("window") => {
-            atrinik_platform::sdl::window_harness(1)?;
+            let iterations = arguments
+                .next()
+                .map_or(Ok(8), |value| value.parse::<usize>())?;
+            if arguments.next().is_some() {
+                return Err("unexpected window argument".into());
+            }
+            atrinik_platform::sdl::window_harness(iterations)?;
             Ok(())
         }
         _ => Err("usage: atrinik-client version|headless|window".into()),

@@ -2,8 +2,10 @@
 //! Independent settings, credential, resource-cache, log, and crash boundaries.
 
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StorageClass {
@@ -48,6 +50,7 @@ pub enum CacheError {
     SizeLimit,
     DigestMismatch,
     ExecutableContent,
+    Missing,
 }
 impl Display for CacheError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -57,10 +60,53 @@ impl Display for CacheError {
             Self::SizeLimit => "resource exceeds transfer or expansion bounds",
             Self::DigestMismatch => "resource digest does not match authenticated claim",
             Self::ExecutableContent => "server-selected executable content is forbidden",
+            Self::Missing => "authenticated resource is not available",
         })
     }
 }
 impl Error for CacheError {}
+
+pub trait ResourceProvider {
+    fn load(&self, claim: &ResourceClaim) -> Result<Arc<[u8]>, CacheError>;
+}
+
+#[derive(Default)]
+pub struct MemoryResourceProvider {
+    resources: BTreeMap<String, ([u8; 32], Arc<[u8]>)>,
+    total_bytes: usize,
+}
+
+impl MemoryResourceProvider {
+    pub fn insert(&mut self, claim: &ResourceClaim, bytes: &[u8]) -> Result<(), CacheError> {
+        verify_resource(claim, bytes)?;
+        let replaced = self
+            .resources
+            .get(&claim.stable_id)
+            .map_or(0, |(_, current)| current.len());
+        let total = self
+            .total_bytes
+            .checked_sub(replaced)
+            .and_then(|value| value.checked_add(bytes.len()))
+            .ok_or(CacheError::SizeLimit)?;
+        if total > 256 * 1024 * 1024 {
+            return Err(CacheError::SizeLimit);
+        }
+        self.resources
+            .insert(claim.stable_id.clone(), (claim.sha256, Arc::from(bytes)));
+        self.total_bytes = total;
+        Ok(())
+    }
+}
+
+impl ResourceProvider for MemoryResourceProvider {
+    fn load(&self, claim: &ResourceClaim) -> Result<Arc<[u8]>, CacheError> {
+        self.resources
+            .get(&claim.stable_id)
+            .filter(|(digest, _)| *digest == claim.sha256)
+            .map(|(_, bytes)| Arc::clone(bytes))
+            .ok_or(CacheError::Missing)
+    }
+}
 
 pub fn verify_resource(claim: &ResourceClaim, bytes: &[u8]) -> Result<(), CacheError> {
     if claim.stable_id.is_empty()
@@ -129,6 +175,9 @@ mod tests {
             media_type: "image/png".into(),
         };
         assert_eq!(verify_resource(&claim, bytes), Ok(()));
+        let mut resources = MemoryResourceProvider::default();
+        resources.insert(&claim, bytes).expect("insert");
+        assert_eq!(resources.load(&claim).expect("load").as_ref(), bytes);
         let executable = b"MZfixture";
         let claim = ResourceClaim {
             sha256: Sha256::digest(executable).into(),
