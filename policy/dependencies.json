@@ -11,6 +11,16 @@
     {"name":"atrinik/protocol","contract":"game-protocol-1","dependency_status":"awaiting released registry crate; path and Git dependencies forbidden"},
     {"name":"atrinik/renderer","contract":"scene-snapshot-1","dependency_status":"awaiting released registry crate; path and Git dependencies forbidden"}
   ],
+  "host_build_dependencies": [
+    {
+      "name": "Ubuntu SDL development headers",
+      "source": "Ubuntu 24.04 runner repositories",
+      "purpose": "compile the Cargo-locked SDL source with Linux desktop, audio, input, and GPU backends",
+      "packages_manifest": "tools/install-linux-native-deps.sh",
+      "validation": "clean ubuntu-24.04 GitHub runner build and empty-window smoke",
+      "upgrade_policy": "review with every runner-image or SDL update; no ambient SDL library is linked"
+    }
+  ],
   "tools": [
     {"name":"Rust","version":"1.97.1","source":"https://static.rust-lang.org","license":"Apache-2.0 OR MIT"},
     {"name":"cargo-deny","version":"0.20.2","source":"https://github.com/EmbarkStudios/cargo-deny","license":"Apache-2.0 OR MIT","linux_amd64_sha256":"9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"},

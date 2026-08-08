@@ -30,6 +30,9 @@ released crates replace the two narrow adapter placeholders in M2.
 
 Rust 1.97.1 is pinned. SDL 3.4.14 is acquired reproducibly from the checksummed
 `sdl3-src` crate and linked statically; no ambient system SDL is selected.
+Linux builders need the desktop, audio, input, and GPU development headers
+listed in `tools/install-linux-native-deps.sh`; CI installs them from the
+Ubuntu 24.04 runner repositories before compiling the locked SDL source.
 
 ```sh
 cargo build --locked --workspace
