@@ -5,7 +5,7 @@
   "eol_response": "upgrade, replace, or remove before an unsupported release ships",
   "direct_dependencies": [
     {"name":"sdl3","version":"0.18.4","native":"SDL 3.4.14","license":"MIT AND Zlib","source":"https://crates.io/crates/sdl3","purpose":"isolated platform/window/input/audio boundary","validation":"Cargo.lock, cargo-deny, source-static build, Linux/Windows checks"},
-    {"name":"sha2","version":"0.10.9","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/sha2","purpose":"authenticated resource digest verification","validation":"Cargo.lock, cargo-deny, unit tests, SBOM"}
+    {"name":"sha2","version":"0.11.0","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/sha2","purpose":"authenticated resource digest verification","validation":"Cargo.lock, cargo-deny, unit tests, SBOM"}
   ],
   "compatibility": [
     {"name":"atrinik/protocol","contract":"game-protocol-1","dependency_status":"awaiting released registry crate; path and Git dependencies forbidden"},
