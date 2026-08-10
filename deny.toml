@@ -10,13 +10,23 @@ yanked = "deny"
 ignore = []
 
 [licenses]
-allow = ["Apache-2.0", "MIT", "Zlib"]
+allow = [
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
 confidence-threshold = 0.93
 
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
 highlight = "all"
+# `prost-derive` remains on syn 2 while ICU's displaydoc has moved to syn 3.
+skip = [{ name = "syn", version = "3.0.3" }]
 deny = [
   { name = "cpython" },
   { name = "pyo3" },

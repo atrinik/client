@@ -3,6 +3,7 @@ members = [
   "crates/atrinik-actions",
   "crates/atrinik-client",
   "crates/atrinik-config-cache",
+  "crates/atrinik-directory",
   "crates/atrinik-platform",
   "crates/atrinik-protocol-adapter",
   "crates/atrinik-scene-adapter",
@@ -22,14 +23,18 @@ repository = "https://github.com/atrinik/client"
 [workspace.dependencies]
 atrinik-actions = { path = "crates/atrinik-actions", version = "=0.1.0" }
 atrinik-config-cache = { path = "crates/atrinik-config-cache", version = "=0.1.0" }
+atrinik-directory = { path = "crates/atrinik-directory", version = "=0.1.0" }
 atrinik-platform = { path = "crates/atrinik-platform", version = "=0.1.0" }
+atrinik-protocol = "=0.1.0"
 atrinik-protocol-adapter = { path = "crates/atrinik-protocol-adapter", version = "=0.1.0" }
 atrinik-scene-adapter = { path = "crates/atrinik-scene-adapter", version = "=0.1.0" }
 atrinik-session = { path = "crates/atrinik-session", version = "=0.1.0" }
 atrinik-testkit = { path = "crates/atrinik-testkit", version = "=0.1.0" }
 atrinik-ui-model = { path = "crates/atrinik-ui-model", version = "=0.1.0" }
+httpdate = "=1.0.3"
 sdl3 = { version = "=0.18.4", default-features = false, features = ["build-from-source-static"] }
 sha2 = "=0.11.0"
+ureq = { version = "=3.4.0", default-features = false, features = ["gzip", "rustls"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

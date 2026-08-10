@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<directory schema="atrinik-directory-v1" generation="42" generated-at="1786219200" expires-at="1786233600">
+  <server id="1111111111111111111111111111111111111111111111111111111111111111" certificate-sha256="1111111111111111111111111111111111111111111111111111111111111111" status="online" password-required="false">
+    <name>Atrinik &quot;Alpha&quot;</name>
+    <description>Cooperative Ω</description>
+    <region>eu-west</region>
+    <protocol major="1" minor="0"/>
+    <content id="atrinik-main" revision-sha256="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/>
+    <players online="3" capacity="64"/>
+    <endpoint hostname="xn--bcher-kva.example.org" port="13327"/>
+  </server>
+  <server id="2222222222222222222222222222222222222222222222222222222222222222" certificate-sha256="2222222222222222222222222222222222222222222222222222222222222222" status="full" password-required="true">
+    <name>Beta</name>
+    <description></description>
+    <protocol major="1" minor="7"/>
+    <content id="atrinik-season-1" revision-sha256="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"/>
+    <players online="64" capacity="64"/>
+  </server>
+</directory>

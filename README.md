@@ -9,7 +9,8 @@ and [provenance policy](PROVENANCE.md) define its clean-room boundary.
 
 ```text
 released Game Protocol 1 -> protocol adapter -> revisioned domain events
-                                                  |
+             |                                    |
+static directory -> directory adapter/cache       |
 semantic input -> semantic actions -> pure session reducer -> immutable view
        ^                                          |                |
        |                                          v                v
@@ -21,10 +22,18 @@ semantic input -> semantic actions -> pure session reducer -> immutable view
 The session/action/UI-model core has no SDL3, GPU, network, filesystem, raw
 Protobuf, or renderer dependency. The SDL3 crate owns native window, input,
 clipboard, clock, and audio-device lifecycle. The scene adapter emits immutable
-frame input only; GPU ownership stays in `atrinik/renderer`. The protocol and
-renderer crates are not yet published to crates.io, so M1 records their v1
-compatibility coordinates without adding sibling path/Git dependencies. Their
-released crates replace the two narrow adapter placeholders in M2.
+frame input only; GPU ownership stays in `atrinik/renderer`. The released,
+exactly pinned `atrinik-protocol` crate terminates inside the protocol adapter.
+The renderer is not yet published to crates.io, so its narrow adapter remains a
+placeholder without sibling path/Git dependencies.
+
+The default launch performs one bounded conditional read of exactly
+`https://meta.atrinik.org/index.json`. Canonical Game Protocol 1 directory data
+is filtered against complete build-time installed-content coordinates before
+it reaches display models. If those coordinates are not packaged yet, the
+client reports listed servers as incompatible rather than guessing. Discovery
+has a dedicated transactional public-data cache and does not affect explicitly
+configured direct connections. See the [directory contract](docs/DIRECTORY.md).
 
 ## Build and test
 
@@ -38,6 +47,7 @@ Ubuntu 24.04 runner repositories before compiling the locked SDL source.
 cargo build --locked --workspace
 cargo test --locked --workspace --all-targets
 cargo run --locked --package atrinik-client -- version
+cargo run --locked --package atrinik-client -- directory
 cargo run --locked --package atrinik-client -- headless
 SDL_VIDEODRIVER=dummy cargo run --locked --package atrinik-client -- window
 ```
