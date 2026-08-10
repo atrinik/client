@@ -1,6 +1,10 @@
 //! Transactional last-known-good directory cache storage.
 
-use atrinik_protocol_adapter::directory::DIRECTORY_BODY_BYTES_LIMIT;
+use crate::{directory_body_sha256, lowercase_hex};
+use atrinik_protocol_adapter::directory::{
+    DIRECTORY_BODY_BYTES_LIMIT, DIRECTORY_CLOCK_SKEW_SECONDS,
+};
+use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs::{self, File, OpenOptions};
@@ -12,7 +16,8 @@ use std::time::{Duration, SystemTime};
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
-const CACHE_MAGIC: &[u8] = b"ATRINIK-DIRECTORY-CACHE-V1\n";
+const CACHE_MAGIC_V1: &[u8] = b"ATRINIK-DIRECTORY-CACHE-V1\n";
+const CACHE_MAGIC_V2: &[u8] = b"ATRINIK-DIRECTORY-CACHE-V2\n";
 const CACHE_ENTRY_PREFIX: &str = "directory-";
 const CACHE_ENTRY_SUFFIX: &str = ".cache";
 const TEMP_PREFIX: &str = ".tmp-";
@@ -26,7 +31,11 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CachedDirectory {
     pub received_at: u64,
+    /// Exact static-alias publication second from `Last-Modified`.
+    /// `None` is accepted only while reading a verified V1 cache record.
+    pub published_at: Option<u64>,
     pub etag: String,
+    pub body_sha256: [u8; 32],
     pub body: Vec<u8>,
 }
 
@@ -355,11 +364,17 @@ fn cleanup_cache(root: &Path, current: &Path) {
 
 fn encode_record(record: &CachedDirectory) -> Result<Vec<u8>, DirectoryCacheError> {
     validate_record_shape(record)?;
+    let published_at = record
+        .published_at
+        .ok_or(DirectoryCacheError::InvalidRecord)?;
     let mut output = Vec::with_capacity(record.body.len() + CACHE_METADATA_ALLOWANCE);
-    output.extend_from_slice(CACHE_MAGIC);
+    output.extend_from_slice(CACHE_MAGIC_V2);
     output.extend_from_slice(format!("received-at:{}\n", record.received_at).as_bytes());
+    output.extend_from_slice(format!("published-at:{published_at}\n").as_bytes());
     output.extend_from_slice(b"etag:");
     output.extend_from_slice(record.etag.as_bytes());
+    output.extend_from_slice(b"\nbody-sha256:");
+    output.extend_from_slice(lowercase_hex(&record.body_sha256).as_bytes());
     output.extend_from_slice(b"\nbody-bytes:");
     output.extend_from_slice(record.body.len().to_string().as_bytes());
     output.extend_from_slice(b"\n\n");
@@ -371,10 +386,23 @@ fn encode_record(record: &CachedDirectory) -> Result<Vec<u8>, DirectoryCacheErro
 }
 
 fn decode_record(input: &[u8]) -> Result<CachedDirectory, DirectoryCacheError> {
-    if input.len() > MAXIMUM_CACHE_ENTRY_BYTES || !input.starts_with(CACHE_MAGIC) {
+    if input.len() > MAXIMUM_CACHE_ENTRY_BYTES {
         return Err(DirectoryCacheError::InvalidRecord);
     }
-    let metadata_start = CACHE_MAGIC.len();
+    if input.starts_with(CACHE_MAGIC_V2) {
+        decode_v2_record(input)
+    } else if input.starts_with(CACHE_MAGIC_V1) {
+        decode_v1_record(input)
+    } else {
+        Err(DirectoryCacheError::InvalidRecord)
+    }
+}
+
+fn metadata_and_body<'a>(
+    input: &'a [u8],
+    magic: &[u8],
+) -> Result<(&'a str, &'a [u8]), DirectoryCacheError> {
+    let metadata_start = magic.len();
     let delimiter = input[metadata_start..]
         .windows(2)
         .position(|window| window == b"\n\n")
@@ -382,6 +410,60 @@ fn decode_record(input: &[u8]) -> Result<CachedDirectory, DirectoryCacheError> {
         .ok_or(DirectoryCacheError::InvalidRecord)?;
     let metadata = std::str::from_utf8(&input[metadata_start..delimiter])
         .map_err(|_| DirectoryCacheError::InvalidRecord)?;
+    Ok((metadata, &input[delimiter + 2..]))
+}
+
+fn decode_v2_record(input: &[u8]) -> Result<CachedDirectory, DirectoryCacheError> {
+    let (metadata, body) = metadata_and_body(input, CACHE_MAGIC_V2)?;
+    let mut lines = metadata.lines();
+    let received_at = canonical_u64(
+        lines
+            .next()
+            .and_then(|line| line.strip_prefix("received-at:"))
+            .ok_or(DirectoryCacheError::InvalidRecord)?,
+    )?;
+    let published_at = canonical_u64(
+        lines
+            .next()
+            .and_then(|line| line.strip_prefix("published-at:"))
+            .ok_or(DirectoryCacheError::InvalidRecord)?,
+    )?;
+    let etag = lines
+        .next()
+        .and_then(|line| line.strip_prefix("etag:"))
+        .filter(|value| valid_strong_etag(value))
+        .ok_or(DirectoryCacheError::InvalidRecord)?
+        .to_owned();
+    let body_sha256 = lines
+        .next()
+        .and_then(|line| line.strip_prefix("body-sha256:"))
+        .and_then(decode_sha256)
+        .ok_or(DirectoryCacheError::InvalidRecord)?;
+    let body_length = canonical_usize(
+        lines
+            .next()
+            .and_then(|line| line.strip_prefix("body-bytes:"))
+            .ok_or(DirectoryCacheError::InvalidRecord)?,
+    )?;
+    if lines.next().is_some() || body_length > DIRECTORY_BODY_BYTES_LIMIT {
+        return Err(DirectoryCacheError::InvalidRecord);
+    }
+    if body.len() != body_length {
+        return Err(DirectoryCacheError::InvalidRecord);
+    }
+    let record = CachedDirectory {
+        received_at,
+        published_at: Some(published_at),
+        etag,
+        body_sha256,
+        body: body.to_vec(),
+    };
+    validate_record_shape(&record)?;
+    Ok(record)
+}
+
+fn decode_v1_record(input: &[u8]) -> Result<CachedDirectory, DirectoryCacheError> {
+    let (metadata, body) = metadata_and_body(input, CACHE_MAGIC_V1)?;
     let mut lines = metadata.lines();
     let received_at = canonical_u64(
         lines
@@ -392,7 +474,7 @@ fn decode_record(input: &[u8]) -> Result<CachedDirectory, DirectoryCacheError> {
     let etag = lines
         .next()
         .and_then(|line| line.strip_prefix("etag:"))
-        .filter(|value| valid_etag_syntax(value))
+        .filter(|value| legacy_body_etag_digest(value).is_some())
         .ok_or(DirectoryCacheError::InvalidRecord)?
         .to_owned();
     let body_length = canonical_usize(
@@ -401,36 +483,82 @@ fn decode_record(input: &[u8]) -> Result<CachedDirectory, DirectoryCacheError> {
             .and_then(|line| line.strip_prefix("body-bytes:"))
             .ok_or(DirectoryCacheError::InvalidRecord)?,
     )?;
-    if lines.next().is_some() || body_length > DIRECTORY_BODY_BYTES_LIMIT {
+    if lines.next().is_some()
+        || body_length > DIRECTORY_BODY_BYTES_LIMIT
+        || body.len() != body_length
+    {
         return Err(DirectoryCacheError::InvalidRecord);
     }
-    let body = input
-        .get(delimiter + 2..)
-        .filter(|body| body.len() == body_length)
-        .ok_or(DirectoryCacheError::InvalidRecord)?
-        .to_vec();
+    let body_sha256 = directory_body_sha256(body);
+    if legacy_body_etag_digest(&etag) != Some(body_sha256) {
+        return Err(DirectoryCacheError::InvalidRecord);
+    }
     Ok(CachedDirectory {
         received_at,
+        published_at: None,
         etag,
-        body,
+        body_sha256,
+        body: body.to_vec(),
     })
 }
 
 fn validate_record_shape(record: &CachedDirectory) -> Result<(), DirectoryCacheError> {
-    if record.body.len() > DIRECTORY_BODY_BYTES_LIMIT || !valid_etag_syntax(&record.etag) {
+    if record.published_at.is_none()
+        || record.body.len() > DIRECTORY_BODY_BYTES_LIMIT
+        || !valid_strong_etag(&record.etag)
+        || directory_body_sha256(&record.body) != record.body_sha256
+        || record.published_at.is_some_and(|published_at| {
+            published_at
+                > record
+                    .received_at
+                    .saturating_add(DIRECTORY_CLOCK_SKEW_SECONDS)
+        })
+    {
         return Err(DirectoryCacheError::InvalidRecord);
     }
     Ok(())
 }
 
-pub(crate) fn valid_etag_syntax(value: &str) -> bool {
-    const PREFIX: &str = "\"atrinik-directory-v1-sha256-";
-    value.len() == PREFIX.len() + 64 + 1
-        && value.starts_with(PREFIX)
+pub(crate) fn valid_strong_etag(value: &str) -> bool {
+    (3..=128).contains(&value.len())
+        && value.starts_with('"')
         && value.ends_with('"')
-        && value[PREFIX.len()..value.len() - 1]
+        && value[1..value.len() - 1]
+            .bytes()
+            .all(|current| (0x21..=0x7e).contains(&current) && !matches!(current, b'"' | b'\\'))
+}
+
+fn legacy_body_etag_digest(value: &str) -> Option<[u8; 32]> {
+    const PREFIX: &str = "\"atrinik-directory-v1-sha256-";
+    if value.len() != PREFIX.len() + 64 + 1 || !value.starts_with(PREFIX) || !value.ends_with('"') {
+        return None;
+    }
+    decode_sha256(&value[PREFIX.len()..value.len() - 1])
+}
+
+fn decode_sha256(value: &str) -> Option<[u8; 32]> {
+    if value.len() != 64
+        || !value
             .bytes()
             .all(|current| current.is_ascii_digit() || (b'a'..=b'f').contains(&current))
+    {
+        return None;
+    }
+    let mut output = [0u8; 32];
+    for (destination, pair) in output.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        *destination = (high << 4) | low;
+    }
+    Some(output)
+}
+
+const fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        _ => None,
+    }
 }
 
 fn canonical_u64(value: &str) -> Result<u64, DirectoryCacheError> {
@@ -469,10 +597,26 @@ fn recognized_cache_name(value: &str) -> bool {
 }
 
 fn cache_filename(record: &CachedDirectory) -> String {
-    let digest = &record.etag[record.etag.len() - 65..record.etag.len() - 1];
+    let digest = record
+        .published_at
+        .map_or(record.body_sha256, |published_at| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"ATRINIK-DIRECTORY-CACHE-KEY-V2\0");
+            hasher.update(record.received_at.to_be_bytes());
+            hasher.update(published_at.to_be_bytes());
+            hasher.update(
+                u16::try_from(record.etag.len())
+                    .expect("validated ETag length fits u16")
+                    .to_be_bytes(),
+            );
+            hasher.update(record.etag.as_bytes());
+            hasher.update(record.body_sha256);
+            hasher.finalize().into()
+        });
     format!(
-        "{CACHE_ENTRY_PREFIX}{:020}-{digest}{CACHE_ENTRY_SUFFIX}",
-        record.received_at
+        "{CACHE_ENTRY_PREFIX}{:020}-{}{CACHE_ENTRY_SUFFIX}",
+        record.received_at,
+        lowercase_hex(&digest),
     )
 }
 
@@ -492,7 +636,6 @@ fn existing_matches(path: &Path, expected: &[u8]) -> Result<(), DirectoryCacheEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sha2::{Digest, Sha256};
 
     fn test_root(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -503,15 +646,11 @@ mod tests {
     }
 
     fn record(received_at: u64, body: &[u8]) -> CachedDirectory {
-        let digest: [u8; 32] = Sha256::digest(body).into();
-        let mut hex = String::with_capacity(64);
-        for byte in digest {
-            use std::fmt::Write as _;
-            write!(&mut hex, "{byte:02x}").expect("string write");
-        }
         CachedDirectory {
             received_at,
-            etag: format!("\"atrinik-directory-v1-sha256-{hex}\""),
+            published_at: Some(received_at.saturating_sub(1)),
+            etag: format!("\"origin-object-{received_at}\""),
+            body_sha256: directory_body_sha256(body),
             body: body.to_vec(),
         }
     }
@@ -521,18 +660,115 @@ mod tests {
         let expected = record(42, b"public directory\n");
         let encoded = encode_record(&expected).expect("encode");
         assert_eq!(decode_record(&encoded), Ok(expected.clone()));
-        assert!(encoded.starts_with(CACHE_MAGIC));
+        assert!(encoded.starts_with(CACHE_MAGIC_V2));
 
         let invalid = [
-            b"ATRINIK-DIRECTORY-CACHE-V1\nreceived-at:042\netag:\"atrinik-directory-v1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nbody-bytes:0\n\n".as_slice(),
-            b"ATRINIK-DIRECTORY-CACHE-V1\nreceived-at:42\netag:W/\"atrinik-directory-v1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nbody-bytes:0\n\n".as_slice(),
-            b"ATRINIK-DIRECTORY-CACHE-V1\nreceived-at:42\netag:\"atrinik-directory-v1-sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\nbody-bytes:0\n\n".as_slice(),
+            b"ATRINIK-DIRECTORY-CACHE-V2\nreceived-at:042\npublished-at:41\netag:\"origin\"\nbody-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nbody-bytes:0\n\n".as_slice(),
+            b"ATRINIK-DIRECTORY-CACHE-V2\nreceived-at:42\npublished-at:41\netag:W/\"origin\"\nbody-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nbody-bytes:0\n\n".as_slice(),
+            b"ATRINIK-DIRECTORY-CACHE-V2\nreceived-at:42\npublished-at:41\netag:\"origin\"\nbody-sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855\nbody-bytes:0\n\n".as_slice(),
+            b"ATRINIK-DIRECTORY-CACHE-V2\nreceived-at:42\npublished-at:41\netag:\"origin\"\nbody-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbody-bytes:0\n\n".as_slice(),
+            b"ATRINIK-DIRECTORY-CACHE-V2\nreceived-at:42\npublished-at:343\netag:\"origin\"\nbody-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nbody-bytes:0\n\n".as_slice(),
         ];
         for value in invalid {
             assert_eq!(
                 decode_record(value),
                 Err(DirectoryCacheError::InvalidRecord)
             );
+        }
+    }
+
+    #[test]
+    fn verified_v1_record_remains_a_last_known_good_migration_candidate() {
+        let body = b"legacy directory\n";
+        let digest = lowercase_hex(&directory_body_sha256(body));
+        let mut encoded = format!(
+            "ATRINIK-DIRECTORY-CACHE-V1\nreceived-at:42\n\
+             etag:\"atrinik-directory-v1-sha256-{digest}\"\n\
+             body-bytes:{}\n\n",
+            body.len(),
+        )
+        .into_bytes();
+        encoded.extend_from_slice(body);
+
+        assert_eq!(
+            decode_record(&encoded),
+            Ok(CachedDirectory {
+                received_at: 42,
+                published_at: None,
+                etag: format!("\"atrinik-directory-v1-sha256-{digest}\""),
+                body_sha256: directory_body_sha256(body),
+                body: body.to_vec(),
+            }),
+        );
+
+        let wrong = encoded
+            .iter()
+            .copied()
+            .take(encoded.len() - 1)
+            .chain(*b"!")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            decode_record(&wrong),
+            Err(DirectoryCacheError::InvalidRecord),
+        );
+    }
+
+    #[test]
+    fn verified_v1_filename_loads_and_v2_metadata_cannot_collide() {
+        let root = test_root("versioned-filenames");
+        create_cache_root(&root).expect("root");
+        let body = b"legacy directory\n";
+        let digest = lowercase_hex(&directory_body_sha256(body));
+        let mut encoded = format!(
+            "ATRINIK-DIRECTORY-CACHE-V1\nreceived-at:42\n\
+             etag:\"atrinik-directory-v1-sha256-{digest}\"\n\
+             body-bytes:{}\n\n",
+            body.len(),
+        )
+        .into_bytes();
+        encoded.extend_from_slice(body);
+        fs::write(
+            root.join(format!(
+                "{CACHE_ENTRY_PREFIX}{:020}-{digest}{CACHE_ENTRY_SUFFIX}",
+                42,
+            )),
+            encoded,
+        )
+        .expect("write legacy cache");
+
+        let mut cache = FileDirectoryCache::new(&root);
+        let loaded = cache.load().expect("load legacy cache");
+        assert_eq!(loaded.candidates.len(), 1);
+        assert_eq!(loaded.candidates[0].published_at, None);
+
+        let first = record(43, body);
+        let mut second = first.clone();
+        second.etag = "\"replacement-object\"".to_owned();
+        assert_ne!(cache_filename(&first), cache_filename(&second));
+        cache.store(&first).expect("store first v2");
+        cache.store(&second).expect("store second v2");
+        let loaded = cache.load().expect("load v2 records");
+        assert_eq!(loaded.candidates.len(), 3);
+        assert!(loaded.candidates.contains(&first));
+        assert!(loaded.candidates.contains(&second));
+        fs::remove_dir_all(root).expect("remove owned test cache");
+    }
+
+    #[test]
+    fn strong_etag_syntax_is_opaque_bounded_and_exact() {
+        assert!(valid_strong_etag("\"a\""));
+        assert!(valid_strong_etag(&format!("\"{}\"", "x".repeat(126))));
+        for invalid in [
+            String::new(),
+            "\"\"".to_owned(),
+            "W/\"a\"".to_owned(),
+            "\"with space\"".to_owned(),
+            "\"with\\slash\"".to_owned(),
+            "\"with\"quote\"".to_owned(),
+            "\"é\"".to_owned(),
+            format!("\"{}\"", "x".repeat(127)),
+        ] {
+            assert!(!valid_strong_etag(&invalid), "{invalid:?}");
         }
     }
 

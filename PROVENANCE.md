@@ -16,3 +16,10 @@ Future protocol bindings may be generated only from a released MIT
 `atrinik/protocol` contract with pinned generator/drift evidence. Future scene
 integration may use only a released `atrinik/renderer` crate. Neither is replaced
 with a sibling path or Git dependency in M1.
+
+The static-directory HTTP validator and cache-V2 changes are newly authored
+from the public MIT `atrinik/protocol` v1.5.3 specification and fixture at
+revision `8942912d55bc571213836bf1ad4ae7663d60b2a4`, plus public HTTP/R2
+interoperability facts. No protocol implementation, classic source, or
+historical client code was copied. The language-neutral fixture manifest is
+retained byte-for-byte and independently digest-pinned.
