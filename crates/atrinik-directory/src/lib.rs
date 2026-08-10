@@ -8,7 +8,7 @@ use atrinik_protocol_adapter::directory::{
     DIRECTORY_CLOCK_SKEW_SECONDS, DirectEndpoint, DirectoryServerStatus, DirectorySnapshot,
     DirectoryValidationError, InstalledCompatibility, parse_directory,
 };
-use cache::{CachedDirectory, DirectoryCache, DirectoryCacheError};
+use cache::{CachedDirectory, DirectoryCache, DirectoryCacheError, valid_strong_etag};
 use httpdate::parse_http_date;
 use sha2::{Digest, Sha256};
 use std::error::Error;
@@ -291,12 +291,25 @@ where
         if record.received_at > now && record.received_at - now > DIRECTORY_CLOCK_SKEW_SECONDS {
             return Err(DirectoryFailure::CacheCorrupt);
         }
-        let expected_etag = directory_etag(&record.body);
-        if record.etag != expected_etag {
+        if !valid_strong_etag(&record.etag)
+            || directory_body_sha256(&record.body) != record.body_sha256
+        {
             return Err(DirectoryFailure::CacheCorrupt);
         }
         let snapshot = parse_directory(&record.body, &self.compatibility)
             .map_err(|_| DirectoryFailure::CacheCorrupt)?;
+        let published_at = record.published_at.unwrap_or(snapshot.generated_at);
+        if published_at
+            > record
+                .received_at
+                .saturating_add(DIRECTORY_CLOCK_SKEW_SECONDS)
+        {
+            return Err(DirectoryFailure::CacheCorrupt);
+        }
+        validate_publication_time(&snapshot, published_at, now)
+            .map_err(|_| DirectoryFailure::CacheCorrupt)?;
+        let mut record = record;
+        record.published_at = Some(published_at);
         Ok(ValidatedRecord {
             record,
             snapshot,
@@ -332,22 +345,25 @@ where
         validate_content_length(&response, response.body.len())?;
         let supplied_etag =
             single_header(&response, "etag")?.ok_or(DirectoryFailure::InvalidMetadata)?;
-        let expected_etag = directory_etag(&response.body);
-        if supplied_etag != expected_etag {
-            return Err(DirectoryFailure::IntegrityMismatch);
+        if !valid_strong_etag(supplied_etag) {
+            return Err(DirectoryFailure::InvalidMetadata);
         }
         let snapshot = parse_directory(&response.body, &self.compatibility)
             .map_err(DirectoryFailure::InvalidDirectory)?;
         let modified = single_header(&response, "last-modified")?
             .ok_or(DirectoryFailure::InvalidMetadata)
             .and_then(parse_http_unix)?;
-        if modified != snapshot.generated_at || !snapshot.fresh_at(now) {
+        validate_publication_time(&snapshot, modified, now)?;
+        if !snapshot.fresh_at(now) {
             return Err(DirectoryFailure::InvalidMetadata);
         }
+        let body_sha256 = directory_body_sha256(&response.body);
         Ok(ValidatedRecord {
             record: CachedDirectory {
                 received_at: now,
-                etag: expected_etag,
+                published_at: Some(modified),
+                etag: supplied_etag.to_owned(),
+                body_sha256,
                 body: response.body,
             },
             snapshot,
@@ -376,7 +392,11 @@ where
             return Err(DirectoryFailure::IntegrityMismatch);
         }
         if let Some(last_modified) = single_header(response, "last-modified")?
-            && parse_http_unix(last_modified)? != cached.snapshot.generated_at
+            && parse_http_unix(last_modified)?
+                != cached
+                    .record
+                    .published_at
+                    .ok_or(DirectoryFailure::InvalidMetadata)?
         {
             return Err(DirectoryFailure::InvalidMetadata);
         }
@@ -507,6 +527,20 @@ fn parse_http_unix(value: &str) -> Result<u64, DirectoryFailure> {
         .map(|duration| duration.as_secs())
 }
 
+fn validate_publication_time(
+    snapshot: &DirectorySnapshot,
+    published_at: u64,
+    now: u64,
+) -> Result<(), DirectoryFailure> {
+    if published_at < snapshot.generated_at
+        || published_at >= snapshot.expires_at
+        || published_at > now.saturating_add(DIRECTORY_CLOCK_SKEW_SECONDS)
+    {
+        return Err(DirectoryFailure::InvalidMetadata);
+    }
+    Ok(())
+}
+
 fn retry_after_seconds(response: &DirectoryResponse, now: u64) -> Result<u64, DirectoryFailure> {
     let value = single_header(response, "retry-after")?.ok_or(DirectoryFailure::InvalidMetadata)?;
     let delay = if !value.is_empty()
@@ -526,9 +560,8 @@ fn retry_after_seconds(response: &DirectoryResponse, now: u64) -> Result<u64, Di
 }
 
 #[must_use]
-pub fn directory_etag(body: &[u8]) -> String {
-    let digest: [u8; 32] = Sha256::digest(body).into();
-    format!("\"atrinik-directory-v1-sha256-{}\"", lowercase_hex(&digest))
+pub fn directory_body_sha256(body: &[u8]) -> [u8; 32] {
+    Sha256::digest(body).into()
 }
 
 fn lowercase_hex(input: &[u8]) -> String {
@@ -570,12 +603,16 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     const NOW: u64 = 1_786_219_201;
+    const GENERATED_AT: u64 = 1_786_219_200;
+    const PUBLISHED_AT: u64 = GENERATED_AT;
     const CANONICAL: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../fixtures/metaserver-directory-v1/canonical.json"
     ));
     const EMPTY: &[u8] = b"{\"schema\":\"atrinik-directory-v1\",\"generation\":\"1\",\"generatedAt\":\"1786219200\",\"expiresAt\":\"1786233600\",\"servers\":[]}\n";
-    const EXPECTED_ETAG: &str = "\"atrinik-directory-v1-sha256-059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78\"";
+    const EXPECTED_BODY_SHA256: &str =
+        "059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78";
+    const EXPECTED_ETAG: &str = "\"0123456789abcdef0123456789abcdef\"";
 
     #[derive(Default)]
     struct FakeTransport {
@@ -614,10 +651,10 @@ mod tests {
             headers.extend([
                 ("content-type".to_owned(), DIRECTORY_MEDIA_TYPE.to_owned()),
                 ("content-length".to_owned(), body.len().to_string()),
-                ("etag".to_owned(), directory_etag(body)),
+                ("etag".to_owned(), origin_etag(body)),
                 (
                     "last-modified".to_owned(),
-                    httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_hours(496_172)),
+                    httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(PUBLISHED_AT)),
                 ),
             ]);
         }
@@ -628,10 +665,27 @@ mod tests {
         }
     }
 
+    fn set_single_header(response: &mut DirectoryResponse, name: &str, value: &str) {
+        response
+            .headers
+            .retain(|(candidate, _)| !candidate.eq_ignore_ascii_case(name));
+        response.headers.push((name.to_owned(), value.to_owned()));
+    }
+
+    fn origin_etag(body: &[u8]) -> String {
+        if body == CANONICAL {
+            return EXPECTED_ETAG.to_owned();
+        }
+        let digest = lowercase_hex(&directory_body_sha256(body));
+        format!("\"origin-object-{}\"", &digest[..32])
+    }
+
     fn cached(received_at: u64) -> CachedDirectory {
         CachedDirectory {
             received_at,
+            published_at: Some(PUBLISHED_AT),
             etag: EXPECTED_ETAG.to_owned(),
+            body_sha256: directory_body_sha256(CANONICAL),
             body: CANONICAL.to_vec(),
         }
     }
@@ -696,6 +750,61 @@ mod tests {
     }
 
     #[test]
+    fn conditional_revalidation_requires_the_same_opaque_validator_and_publication_time() {
+        for (etag, published_at, expected) in [
+            (
+                "\"different-object\"",
+                Some(PUBLISHED_AT),
+                DirectoryFailure::IntegrityMismatch,
+            ),
+            (
+                EXPECTED_ETAG,
+                Some(PUBLISHED_AT + 1),
+                DirectoryFailure::InvalidMetadata,
+            ),
+        ] {
+            let mut not_modified = response(304, &[]);
+            not_modified.headers = vec![("etag".to_owned(), etag.to_owned())];
+            if let Some(value) = published_at {
+                not_modified.headers.push((
+                    "last-modified".to_owned(),
+                    httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(value)),
+                ));
+            }
+            let transport = FakeTransport::returning(Ok(not_modified));
+            let cache = MemoryDirectoryCache::with_records(vec![cached(NOW - 10)]);
+            let mut service = DirectoryService::new(transport, cache, compatibility());
+            let view = service.refresh(NOW);
+            assert_eq!(view.source, DirectorySource::Cache);
+            assert_eq!(view.notice, Some(expected));
+        }
+    }
+
+    #[test]
+    fn verified_v1_cache_record_migrates_on_revalidation() {
+        let mut legacy = cached(NOW - 10);
+        legacy.published_at = None;
+        legacy.etag = format!(
+            "\"atrinik-directory-v1-sha256-{}\"",
+            lowercase_hex(&legacy.body_sha256),
+        );
+        let mut not_modified = response(304, &[]);
+        not_modified.headers = vec![("etag".to_owned(), legacy.etag.clone())];
+        let transport = FakeTransport::returning(Ok(not_modified));
+        let cache = MemoryDirectoryCache::with_records(vec![legacy]);
+        let mut service = DirectoryService::new(transport, cache, compatibility());
+
+        let view = service.refresh(NOW);
+        assert_eq!(view.source, DirectorySource::Revalidated);
+        let (_, cache, _) = service.into_parts();
+        assert_eq!(cache.records()[0].published_at, Some(GENERATED_AT));
+        assert_eq!(
+            cache.records()[0].body_sha256,
+            directory_body_sha256(CANONICAL)
+        );
+    }
+
+    #[test]
     fn network_failures_use_fresh_then_stale_lkg_but_never_stale_for_connection() {
         let transport = FakeTransport::returning(Err(DirectoryTransportError::Timeout));
         let mut service = DirectoryService::new(
@@ -730,13 +839,28 @@ mod tests {
     #[test]
     fn corrupt_cache_does_not_poison_request_or_hide_transport_failure() {
         let mut bad = cached(NOW - 1);
-        bad.etag = directory_etag(b"different");
+        bad.body_sha256 = directory_body_sha256(b"different");
         let transport = FakeTransport::returning(Err(DirectoryTransportError::Tls));
         let cache = MemoryDirectoryCache::with_records(vec![bad]);
         let mut service = DirectoryService::new(transport, cache, compatibility());
         let view = service.refresh(NOW);
         assert_eq!(view.availability, DirectoryAvailability::Unavailable);
         assert_eq!(view.notice, Some(DirectoryFailure::Tls));
+        let (transport, _, _) = service.into_parts();
+        assert_eq!(transport.requests, [DirectoryRequest::new(None)]);
+    }
+
+    #[test]
+    fn cached_publication_time_is_bound_to_its_local_receipt_clock() {
+        let mut bad = cached(GENERATED_AT - DIRECTORY_CLOCK_SKEW_SECONDS - 1);
+        bad.published_at = Some(GENERATED_AT);
+        let transport = FakeTransport::returning(Err(DirectoryTransportError::Offline));
+        let cache = MemoryDirectoryCache::with_records(vec![bad]);
+        let mut service = DirectoryService::new(transport, cache, compatibility());
+
+        let view = service.refresh(NOW);
+        assert_eq!(view.availability, DirectoryAvailability::Unavailable);
+        assert_eq!(view.notice, Some(DirectoryFailure::Offline));
         let (transport, _, _) = service.into_parts();
         assert_eq!(transport.requests, [DirectoryRequest::new(None)]);
     }
@@ -795,6 +919,73 @@ mod tests {
         let view = service.refresh(1_786_218_899);
         assert_eq!(view.availability, DirectoryAvailability::Unavailable);
         assert_eq!(view.notice, Some(DirectoryFailure::InvalidMetadata));
+    }
+
+    #[test]
+    fn opaque_etag_and_alias_publication_time_are_validated_independently() {
+        let mut opaque = response(200, CANONICAL);
+        set_single_header(&mut opaque, "etag", "\"r2-object-!#$%&'*+-.^_`|~\"");
+        let transport = FakeTransport::returning(Ok(opaque));
+        let mut service =
+            DirectoryService::new(transport, MemoryDirectoryCache::default(), compatibility());
+        let view = service.refresh(NOW);
+        assert_eq!(view.source, DirectorySource::Network);
+        let (_, cache, _) = service.into_parts();
+        assert_eq!(cache.records()[0].etag, "\"r2-object-!#$%&'*+-.^_`|~\"");
+        assert_eq!(
+            lowercase_hex(&cache.records()[0].body_sha256),
+            EXPECTED_BODY_SHA256,
+        );
+
+        for etag in [
+            "W/\"weak\"".to_owned(),
+            "\"\"".to_owned(),
+            "\"contains space\"".to_owned(),
+            "\"contains\\slash\"".to_owned(),
+            format!("\"{}\"", "x".repeat(127)),
+        ] {
+            let mut invalid = response(200, CANONICAL);
+            set_single_header(&mut invalid, "etag", &etag);
+            let transport = FakeTransport::returning(Ok(invalid));
+            let mut service =
+                DirectoryService::new(transport, MemoryDirectoryCache::default(), compatibility());
+            assert_eq!(
+                service.refresh(NOW).notice,
+                Some(DirectoryFailure::InvalidMetadata),
+                "{etag:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn alias_publication_time_obeys_generation_expiry_and_clock_bounds() {
+        for (now, modified, accepted) in [
+            (NOW, GENERATED_AT, true),
+            (NOW, NOW + DIRECTORY_CLOCK_SKEW_SECONDS, true),
+            (NOW, NOW + DIRECTORY_CLOCK_SKEW_SECONDS + 1, false),
+            (NOW, GENERATED_AT - 1, false),
+            (1_786_233_599, 1_786_233_599, true),
+            (1_786_233_600, 1_786_233_600, false),
+        ] {
+            let mut value = response(200, CANONICAL);
+            set_single_header(
+                &mut value,
+                "last-modified",
+                &httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(modified)),
+            );
+            let transport = FakeTransport::returning(Ok(value));
+            let mut service =
+                DirectoryService::new(transport, MemoryDirectoryCache::default(), compatibility());
+            let view = service.refresh(now);
+            assert_eq!(
+                view.source == DirectorySource::Network,
+                accepted,
+                "{now}/{modified}"
+            );
+            if !accepted {
+                assert_eq!(view.notice, Some(DirectoryFailure::InvalidMetadata));
+            }
+        }
     }
 
     #[test]
@@ -897,7 +1088,11 @@ mod tests {
     }
 
     #[test]
-    fn etag_matches_the_language_neutral_manifest() {
-        assert_eq!(directory_etag(CANONICAL), EXPECTED_ETAG);
+    fn body_digest_and_opaque_http_etag_match_the_language_neutral_manifest() {
+        assert_eq!(
+            lowercase_hex(&directory_body_sha256(CANONICAL)),
+            EXPECTED_BODY_SHA256,
+        );
+        assert!(valid_strong_etag(EXPECTED_ETAG));
     }
 }

@@ -1,5 +1,6 @@
 //! Fixed-origin HTTPS transport for static directory retrieval.
 
+use crate::cache::valid_strong_etag;
 use atrinik_protocol_adapter::directory::DIRECTORY_BODY_BYTES_LIMIT;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -119,6 +120,10 @@ impl DirectoryTransport for UreqDirectoryTransport {
         if request.url != DIRECTORY_URL
             || request.accept != DIRECTORY_MEDIA_TYPE
             || request.cache_control != "no-cache"
+            || request
+                .if_none_match
+                .as_deref()
+                .is_some_and(|etag| !valid_strong_etag(etag))
         {
             return Err(DirectoryTransportError::Protocol);
         }
@@ -252,6 +257,17 @@ mod tests {
         };
         assert_eq!(
             transport.fetch(&invalid),
+            Err(DirectoryTransportError::Protocol)
+        );
+
+        let invalid_validator = DirectoryRequest {
+            url: DIRECTORY_URL,
+            accept: DIRECTORY_MEDIA_TYPE,
+            cache_control: "no-cache",
+            if_none_match: Some("W/\"weak\"".to_owned()),
+        };
+        assert_eq!(
+            transport.fetch(&invalid_validator),
             Err(DirectoryTransportError::Protocol)
         );
     }

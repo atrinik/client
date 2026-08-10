@@ -1,11 +1,12 @@
 {
-  "fixture_version": 1,
+  "fixture_version": 2,
   "schema": "atrinik-directory-v1",
   "positive": {
     "json": "metaserver-directory-v1/canonical.json",
     "xml": "metaserver-directory-v1/projection.xml",
     "projection_semantics": "metaserver-directory-v1/projection-semantics.json",
-    "etag": "\"atrinik-directory-v1-sha256-059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78\""
+    "body_sha256": "059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78",
+    "http_strong_etag": "\"0123456789abcdef0123456789abcdef\""
   },
   "negative": [
     {"file": "metaserver-directory-v1/negative-unsupported-schema.json", "error": "unsupported_schema"},
@@ -31,6 +32,7 @@
     "players": 100000,
     "hostname_bytes": 253,
     "port": 65535,
-    "snapshot_lifetime_seconds": 14400
+    "snapshot_lifetime_seconds": 14400,
+    "http_etag_bytes": 128
   }
 }

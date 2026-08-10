@@ -23,6 +23,7 @@ fi
 
 for required in CONTRIBUTING.md PROVENANCE.md SECURITY.md docs/PLATFORM.md docs/DIRECTORY.md decisions/0001-client-architecture.md fixtures/README.md fixtures/metaserver-directory-v1.json; do test -s "${required}"; done
 test "$(sha256sum fixtures/metaserver-directory-v1/canonical.json | awk '{print $1}')" = 059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78
+test "$(sha256sum fixtures/metaserver-directory-v1.json | awk '{print $1}')" = 0aa322621a3057dbeb0e738c7d54e7239c87be20933a2938e626c816e25c51ae
 test "$(git check-attr eol -- fixtures/metaserver-directory-v1/canonical.json)" = "fixtures/metaserver-directory-v1/canonical.json: eol: lf"
 if grep -RInE '(index\.wsgi|/v2/|index\.xml)' crates --include='*.rs'; then
   echo "replacement client source contains a classic metaserver route" >&2

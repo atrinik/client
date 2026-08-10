@@ -8,7 +8,7 @@
     {"name":"atrinik-protocol","version":"0.1.0","native":null,"license":"MIT","source":"https://crates.io/crates/atrinik-protocol","purpose":"released Game Protocol 1 static-directory parser and bounds","validation":"Cargo.lock, protocol fixtures, cargo-deny, unit tests, SBOM"},
     {"name":"httpdate","version":"1.0.3","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/httpdate","purpose":"strict static-directory Last-Modified and Retry-After handling","validation":"Cargo.lock, cargo-deny, metadata boundary tests, SBOM"},
     {"name":"sdl3","version":"0.18.4","native":"SDL 3.4.14","license":"MIT AND Zlib","source":"https://crates.io/crates/sdl3","purpose":"isolated platform/window/input/audio boundary","validation":"Cargo.lock, cargo-deny, source-static build, Linux/Windows checks"},
-    {"name":"sha2","version":"0.11.0","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/sha2","purpose":"authenticated resource and static-directory ETag digest verification","validation":"Cargo.lock, cargo-deny, unit tests, SBOM"},
+    {"name":"sha2","version":"0.11.0","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/sha2","purpose":"authenticated resource and static-directory body/cache identity digest verification","validation":"Cargo.lock, cargo-deny, unit tests, SBOM"},
     {"name":"ureq","version":"3.4.0","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/ureq","purpose":"bounded blocking HTTPS retrieval of the fixed static directory origin","validation":"Cargo.lock, cargo-deny, fixed-request transport tests, Linux/Windows builds, SBOM"}
   ],
   "compatibility": [
