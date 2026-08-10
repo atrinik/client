@@ -413,61 +413,76 @@ mod tests {
     }
     #[test]
     fn platform_cache_paths_are_absolute_distinct_and_fail_closed() {
-        assert_eq!(
-            cache_root_for(
-                CachePlatform::Windows,
-                Some(OsStr::new("C:\\Users\\player\\AppData\\Local")),
-                None,
-                None,
-            ),
-            if cfg!(windows) {
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                cache_root_for(
+                    CachePlatform::Windows,
+                    Some(OsStr::new("C:\\Users\\player\\AppData\\Local")),
+                    None,
+                    None,
+                ),
                 Ok(PathBuf::from(
                     "C:\\Users\\player\\AppData\\Local\\Atrinik\\cache",
                 ))
-            } else {
+            );
+            assert_eq!(
+                cache_root_for(CachePlatform::Windows, None, None, None),
+                Err(PlatformPathError::MissingEnvironment)
+            );
+            assert_eq!(
+                cache_root_for(
+                    CachePlatform::Windows,
+                    Some(OsStr::new("relative")),
+                    None,
+                    None,
+                ),
                 Err(PlatformPathError::RelativeEnvironment)
-            }
-        );
-        assert_eq!(
-            cache_root_for(
-                CachePlatform::MacOs,
-                None,
-                None,
-                Some(OsStr::new("/Users/player")),
-            ),
-            Ok(PathBuf::from("/Users/player/Library/Caches/Atrinik"))
-        );
-        assert_eq!(
-            cache_root_for(
-                CachePlatform::Unix,
-                None,
-                Some(OsStr::new("/cache/player")),
-                Some(OsStr::new("/home/player")),
-            ),
-            Ok(PathBuf::from("/cache/player/atrinik"))
-        );
-        assert_eq!(
-            cache_root_for(
-                CachePlatform::Unix,
-                None,
-                None,
-                Some(OsStr::new("/home/player")),
-            ),
-            Ok(PathBuf::from("/home/player/.cache/atrinik"))
-        );
-        assert_eq!(
-            cache_root_for(CachePlatform::Unix, None, None, None),
-            Err(PlatformPathError::MissingEnvironment)
-        );
-        assert_eq!(
-            cache_root_for(
-                CachePlatform::Unix,
-                None,
-                Some(OsStr::new("relative")),
-                None,
-            ),
-            Err(PlatformPathError::RelativeEnvironment)
-        );
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            assert_eq!(
+                cache_root_for(
+                    CachePlatform::MacOs,
+                    None,
+                    None,
+                    Some(OsStr::new("/Users/player")),
+                ),
+                Ok(PathBuf::from("/Users/player/Library/Caches/Atrinik"))
+            );
+            assert_eq!(
+                cache_root_for(
+                    CachePlatform::Unix,
+                    None,
+                    Some(OsStr::new("/cache/player")),
+                    Some(OsStr::new("/home/player")),
+                ),
+                Ok(PathBuf::from("/cache/player/atrinik"))
+            );
+            assert_eq!(
+                cache_root_for(
+                    CachePlatform::Unix,
+                    None,
+                    None,
+                    Some(OsStr::new("/home/player")),
+                ),
+                Ok(PathBuf::from("/home/player/.cache/atrinik"))
+            );
+            assert_eq!(
+                cache_root_for(CachePlatform::Unix, None, None, None),
+                Err(PlatformPathError::MissingEnvironment)
+            );
+            assert_eq!(
+                cache_root_for(
+                    CachePlatform::Unix,
+                    None,
+                    Some(OsStr::new("relative")),
+                    None,
+                ),
+                Err(PlatformPathError::RelativeEnvironment)
+            );
+        }
     }
     #[test]
     fn lifecycle_handles_resize_hotplug_loss_and_shutdown() {
