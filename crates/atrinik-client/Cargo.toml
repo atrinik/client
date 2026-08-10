@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 atrinik-config-cache.workspace = true
+atrinik-directory.workspace = true
 atrinik-platform.workspace = true
 atrinik-protocol-adapter.workspace = true
 atrinik-scene-adapter.workspace = true

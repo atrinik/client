@@ -1,0 +1,36 @@
+{
+  "fixture_version": 1,
+  "schema": "atrinik-directory-v1",
+  "positive": {
+    "json": "metaserver-directory-v1/canonical.json",
+    "xml": "metaserver-directory-v1/projection.xml",
+    "projection_semantics": "metaserver-directory-v1/projection-semantics.json",
+    "etag": "\"atrinik-directory-v1-sha256-059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78\""
+  },
+  "negative": [
+    {"file": "metaserver-directory-v1/negative-unsupported-schema.json", "error": "unsupported_schema"},
+    {"file": "metaserver-directory-v1/negative-zero-generation.json", "error": "invalid_generation"},
+    {"file": "metaserver-directory-v1/negative-expired-at-generation.json", "error": "invalid_freshness"},
+    {"file": "metaserver-directory-v1/negative-identity-mismatch.json", "error": "invalid_identity"},
+    {"file": "metaserver-directory-v1/negative-numeric-endpoint.json", "error": "invalid_endpoint"},
+    {"file": "metaserver-directory-v1/negative-invalid-alabel.json", "error": "invalid_endpoint"},
+    {"file": "metaserver-directory-v1/negative-status-count.json", "error": "invalid_status"},
+    {"file": "metaserver-directory-v1/negative-unordered-servers.json", "error": "unordered_servers"},
+    {"file": "metaserver-directory-v1/negative-duplicate-server.json", "error": "unordered_servers"},
+    {"file": "metaserver-directory-v1/negative-noncanonical-whitespace.json", "error": "noncanonical_json"},
+    {"file": "metaserver-directory-v1/negative-private-field.json", "error": "noncanonical_json"},
+    {"file": "metaserver-directory-v1/negative-xml-noncharacter.json", "error": "invalid_text"}
+  ],
+  "maximum_bounds": {
+    "body_bytes": 262144,
+    "servers": 512,
+    "name_utf8_bytes": 80,
+    "description_utf8_bytes": 512,
+    "region_bytes": 32,
+    "content_id_bytes": 64,
+    "players": 100000,
+    "hostname_bytes": 253,
+    "port": 65535,
+    "snapshot_lifetime_seconds": 14400
+  }
+}

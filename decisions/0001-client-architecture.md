@@ -32,3 +32,14 @@ diagnostics, then releases SDL. Malformed network input belongs to the protocol
 adapter; stale/invalid state to the reducer; transport rejection to the request
 sink; device loss to platform state; renderer loss to the scene/GPU adapter;
 cache integrity failure to the cache owner. None partially mutates session state.
+
+Static server discovery is a separate bounded input pipeline. The released
+protocol parser and generated directory types terminate in the protocol adapter,
+which returns client-owned immutable records only after canonical schema,
+identity, endpoint, capacity, and installed-content validation. The directory
+owner alone performs the fixed-origin HTTPS request, conditional revalidation,
+freshness policy, and transactional public-data cache. Server ID/certificate
+material remains authoritative; hostnames and rendezvous are routing hints.
+Stale snapshots can be displayed for at most the documented last-known-good
+window but cannot create a connection plan. Direct configured connections do
+not depend on discovery availability.

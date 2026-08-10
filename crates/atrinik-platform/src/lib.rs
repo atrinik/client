@@ -5,7 +5,90 @@ use atrinik_actions::{Direction, SemanticInput};
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
 use std::time::Duration;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlatformPathError {
+    MissingEnvironment,
+    RelativeEnvironment,
+}
+
+impl Display for PlatformPathError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingEnvironment => "platform cache directory is unavailable",
+            Self::RelativeEnvironment => "platform cache directory is not absolute",
+        })
+    }
+}
+
+impl Error for PlatformPathError {}
+
+pub fn default_client_cache_root() -> Result<PathBuf, PlatformPathError> {
+    #[cfg(target_os = "windows")]
+    let root = cache_root_for(
+        CachePlatform::Windows,
+        std::env::var_os("LOCALAPPDATA").as_deref(),
+        None,
+        None,
+    )?;
+
+    #[cfg(target_os = "macos")]
+    let root = cache_root_for(
+        CachePlatform::MacOs,
+        None,
+        None,
+        std::env::var_os("HOME").as_deref(),
+    )?;
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let root = cache_root_for(
+        CachePlatform::Unix,
+        None,
+        std::env::var_os("XDG_CACHE_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )?;
+
+    Ok(root)
+}
+
+#[derive(Clone, Copy)]
+#[allow(dead_code)] // The shared pure path policy is tested on every host target.
+enum CachePlatform {
+    Windows,
+    MacOs,
+    Unix,
+}
+
+fn cache_root_for(
+    platform: CachePlatform,
+    local_app_data: Option<&std::ffi::OsStr>,
+    xdg_cache_home: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> Result<PathBuf, PlatformPathError> {
+    let root = match platform {
+        CachePlatform::Windows => {
+            PathBuf::from(local_app_data.ok_or(PlatformPathError::MissingEnvironment)?)
+                .join("Atrinik")
+                .join("cache")
+        }
+        CachePlatform::MacOs => PathBuf::from(home.ok_or(PlatformPathError::MissingEnvironment)?)
+            .join("Library")
+            .join("Caches")
+            .join("Atrinik"),
+        CachePlatform::Unix => match xdg_cache_home {
+            Some(value) => PathBuf::from(value).join("atrinik"),
+            None => PathBuf::from(home.ok_or(PlatformPathError::MissingEnvironment)?)
+                .join(".cache")
+                .join("atrinik"),
+        },
+    };
+    if !root.is_absolute() {
+        return Err(PlatformPathError::RelativeEnvironment);
+    }
+    Ok(root)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RawInput {
@@ -320,11 +403,70 @@ pub mod sdl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
     #[test]
     fn devices_have_identical_navigation_semantics() {
         assert_eq!(
             semantic_input(RawInput::KeyLeft),
             semantic_input(RawInput::ControllerLeft)
+        );
+    }
+    #[test]
+    fn platform_cache_paths_are_absolute_distinct_and_fail_closed() {
+        assert_eq!(
+            cache_root_for(
+                CachePlatform::Windows,
+                Some(OsStr::new("C:\\Users\\player\\AppData\\Local")),
+                None,
+                None,
+            ),
+            if cfg!(windows) {
+                Ok(PathBuf::from(
+                    "C:\\Users\\player\\AppData\\Local\\Atrinik\\cache",
+                ))
+            } else {
+                Err(PlatformPathError::RelativeEnvironment)
+            }
+        );
+        assert_eq!(
+            cache_root_for(
+                CachePlatform::MacOs,
+                None,
+                None,
+                Some(OsStr::new("/Users/player")),
+            ),
+            Ok(PathBuf::from("/Users/player/Library/Caches/Atrinik"))
+        );
+        assert_eq!(
+            cache_root_for(
+                CachePlatform::Unix,
+                None,
+                Some(OsStr::new("/cache/player")),
+                Some(OsStr::new("/home/player")),
+            ),
+            Ok(PathBuf::from("/cache/player/atrinik"))
+        );
+        assert_eq!(
+            cache_root_for(
+                CachePlatform::Unix,
+                None,
+                None,
+                Some(OsStr::new("/home/player")),
+            ),
+            Ok(PathBuf::from("/home/player/.cache/atrinik"))
+        );
+        assert_eq!(
+            cache_root_for(CachePlatform::Unix, None, None, None),
+            Err(PlatformPathError::MissingEnvironment)
+        );
+        assert_eq!(
+            cache_root_for(
+                CachePlatform::Unix,
+                None,
+                Some(OsStr::new("relative")),
+                None,
+            ),
+            Err(PlatformPathError::RelativeEnvironment)
         );
     }
     #[test]

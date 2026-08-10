@@ -1,0 +1,25 @@
+{
+  "schema": "atrinik-directory-v1",
+  "generation": "42",
+  "generated_at": "1786219200",
+  "expires_at": "1786233600",
+  "server_order": [
+    "1111111111111111111111111111111111111111111111111111111111111111",
+    "2222222222222222222222222222222222222222222222222222222222222222"
+  ],
+  "text_values": [
+    {"name": "Atrinik \"Alpha\"", "description": "Cooperative Ω", "region": "eu-west"},
+    {"name": "Beta", "description": "", "region": null}
+  ],
+  "endpoint_presence": [true, false],
+  "password_required": [false, true],
+  "html": {
+    "all_directory_strings_are_text": true,
+    "active_content_from_directory_values": false,
+    "absent_values_are_not_synthesized": true
+  },
+  "xml": {
+    "fixture": "projection.xml",
+    "absent_values_are_omitted": true
+  }
+}

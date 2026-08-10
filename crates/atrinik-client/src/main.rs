@@ -1,15 +1,27 @@
 #![forbid(unsafe_code)]
 
 use atrinik_config_cache::StorageClass;
+use atrinik_directory::cache::FileDirectoryCache;
+use atrinik_directory::transport::UreqDirectoryTransport;
+use atrinik_directory::{DirectoryService, DirectoryView};
+use atrinik_platform::default_client_cache_root;
+use atrinik_protocol_adapter::directory::InstalledCompatibility;
 use atrinik_protocol_adapter::{Envelope, PROTOCOL_CONTRACT, ValidatedMessage, into_domain};
 use atrinik_scene_adapter::RENDERER_CONTRACT;
 use atrinik_session::Session;
 use atrinik_ui_model::model;
 use std::error::Error;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args().skip(1);
     match arguments.next().as_deref() {
+        None | Some("directory") => {
+            if arguments.next().is_some() {
+                return Err("unexpected directory argument".into());
+            }
+            directory()
+        }
         Some("version") => {
             println!(
                 "atrinik-client {} rust={} target={} protocol={} renderer={}",
@@ -32,8 +44,36 @@ fn main() -> Result<(), Box<dyn Error>> {
             atrinik_platform::sdl::window_harness(iterations)?;
             Ok(())
         }
-        _ => Err("usage: atrinik-client version|headless|window".into()),
+        _ => Err("usage: atrinik-client [directory]|version|headless|window".into()),
     }
+}
+
+fn directory() -> Result<(), Box<dyn Error>> {
+    let cache_root = default_client_cache_root()?.join(StorageClass::DirectoryCache.directory());
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let mut service = DirectoryService::new(
+        UreqDirectoryTransport::new(),
+        FileDirectoryCache::new(cache_root),
+        InstalledCompatibility::Unavailable,
+    );
+    print_directory_view(&service.refresh(now));
+    Ok(())
+}
+
+fn print_directory_view(view: &DirectoryView) {
+    let compatible = view
+        .snapshot
+        .as_ref()
+        .map_or(0, |snapshot| snapshot.servers.len());
+    let incompatible = view
+        .snapshot
+        .as_ref()
+        .map_or(0, |snapshot| snapshot.incompatible_servers);
+    let notice = view.notice.map_or("none", |value| value.code());
+    println!(
+        "{}; compatible={compatible}; hidden-incompatible={incompatible}; notice={notice}",
+        view.message()
+    );
 }
 
 fn headless() -> Result<(), Box<dyn Error>> {

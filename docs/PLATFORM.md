@@ -22,3 +22,12 @@ effects/interface with bounded volume; hotplug/loss is explicit and never a
 panic. Decoded media comes only through the authenticated resource provider.
 The foundation defines deterministic headless substitutes; mixing/conversion and
 real file-dialog/clipboard adapters land with their owning playable issues.
+
+Directory data uses the platform cache root, in a dedicated `directory`
+storage class distinct from resources, settings, credentials, logs, and mutable
+game state. Linux uses `$XDG_CACHE_HOME/atrinik` or `$HOME/.cache/atrinik`, macOS
+uses `$HOME/Library/Caches/Atrinik`, and Windows uses
+`%LOCALAPPDATA%\Atrinik\cache`. Relative or missing roots fail closed. On Unix
+the cache directory is owner-only; individual records are create-only,
+sync-before-publish files. Cache loss or write failure never blocks a valid
+network directory or an explicit direct connection.

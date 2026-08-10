@@ -21,7 +21,12 @@ if find crates -type f \( -name '*.pb.rs' -o -name '*_generated.rs' \) -print -q
   exit 1
 fi
 
-for required in CONTRIBUTING.md PROVENANCE.md SECURITY.md docs/PLATFORM.md decisions/0001-client-architecture.md; do test -s "${required}"; done
+for required in CONTRIBUTING.md PROVENANCE.md SECURITY.md docs/PLATFORM.md docs/DIRECTORY.md decisions/0001-client-architecture.md fixtures/README.md fixtures/metaserver-directory-v1.json; do test -s "${required}"; done
+test "$(sha256sum fixtures/metaserver-directory-v1/canonical.json | awk '{print $1}')" = 059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78
+if grep -RInE '(index\.wsgi|/v2/|index\.xml)' crates --include='*.rs'; then
+  echo "replacement client source contains a classic metaserver route" >&2
+  exit 1
+fi
 notice=$(mktemp /tmp/atrinik-client-notice.XXXXXX)
 trap 'rm -f -- "${notice}"' EXIT
 tools/generate-notices.sh >"${notice}"

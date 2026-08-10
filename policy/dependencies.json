@@ -2,13 +2,17 @@
   "schema_version": 1,
   "owner": "client maintainers",
   "review_cadence": "monthly and on every dependency update",
+  "transitive_license_allowlist": ["Apache-2.0", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "MIT", "Unicode-3.0", "Zlib"],
   "eol_response": "upgrade, replace, or remove before an unsupported release ships",
   "direct_dependencies": [
+    {"name":"atrinik-protocol","version":"0.1.0","native":null,"license":"MIT","source":"https://crates.io/crates/atrinik-protocol","purpose":"released Game Protocol 1 static-directory parser and bounds","validation":"Cargo.lock, protocol fixtures, cargo-deny, unit tests, SBOM"},
+    {"name":"httpdate","version":"1.0.3","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/httpdate","purpose":"strict static-directory Last-Modified and Retry-After handling","validation":"Cargo.lock, cargo-deny, metadata boundary tests, SBOM"},
     {"name":"sdl3","version":"0.18.4","native":"SDL 3.4.14","license":"MIT AND Zlib","source":"https://crates.io/crates/sdl3","purpose":"isolated platform/window/input/audio boundary","validation":"Cargo.lock, cargo-deny, source-static build, Linux/Windows checks"},
-    {"name":"sha2","version":"0.11.0","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/sha2","purpose":"authenticated resource digest verification","validation":"Cargo.lock, cargo-deny, unit tests, SBOM"}
+    {"name":"sha2","version":"0.11.0","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/sha2","purpose":"authenticated resource and static-directory ETag digest verification","validation":"Cargo.lock, cargo-deny, unit tests, SBOM"},
+    {"name":"ureq","version":"3.4.0","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/ureq","purpose":"bounded blocking HTTPS retrieval of the fixed static directory origin","validation":"Cargo.lock, cargo-deny, fixed-request transport tests, Linux/Windows builds, SBOM"}
   ],
   "compatibility": [
-    {"name":"atrinik/protocol","contract":"game-protocol-1","dependency_status":"awaiting released registry crate; path and Git dependencies forbidden"},
+    {"name":"atrinik/protocol","contract":"game-protocol-1 and atrinik-directory-v1","dependency_status":"released crates.io package pinned exactly; path and Git dependencies forbidden"},
     {"name":"atrinik/renderer","contract":"scene-snapshot-1","dependency_status":"awaiting released registry crate; path and Git dependencies forbidden"}
   ],
   "host_build_dependencies": [

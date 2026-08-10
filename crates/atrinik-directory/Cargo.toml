@@ -1,5 +1,5 @@
 [package]
-name = "atrinik-protocol-adapter"
+name = "atrinik-directory"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,9 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-atrinik-actions.workspace = true
-atrinik-protocol.workspace = true
-atrinik-session.workspace = true
+atrinik-protocol-adapter.workspace = true
+httpdate.workspace = true
+sha2.workspace = true
+ureq.workspace = true
 
 [lints]
 workspace = true
