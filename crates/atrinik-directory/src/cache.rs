@@ -302,6 +302,8 @@ fn sync_directory(root: &Path) -> Result<(), DirectoryCacheError> {
             .and_then(|directory| directory.sync_all())
             .map_err(|_| DirectoryCacheError::Io)?;
     }
+    #[cfg(not(unix))]
+    let _ = root;
     Ok(())
 }
 
