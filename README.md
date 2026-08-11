@@ -5,6 +5,25 @@ The fresh MIT Atrinik client is a Rust 2024/SDL3 application independent of
 tooling. The [replacement roadmap](https://github.com/atrinik/atrinik/issues/168)
 and [provenance policy](PROVENANCE.md) define its clean-room boundary.
 
+## Development model
+
+This client is part of Atrinik's agentic next-generation reimplementation and
+improvement of the human-developed Classic experience. It is fresh
+MIT-licensed Rust/SDL3 code—not a mechanical C translation or source port—and
+is developed primarily through Codex-driven workflows under maintainer
+direction, review, provenance controls, tests, and repository validation.
+“Agentic” describes the project's primary current software-development
+workflow; it does not mean that every line or commit is agent-written. Direct
+human-written code contributions are welcome under the same controls.
+
+The game content and media presented by the client are external inputs, not
+part of the client's MIT-licensed code. Atrinik's pixel art, maps, stories,
+music, and sound effects remain human-created work with their exact authors,
+upstream credit, licenses, and notices. See the
+[canonical project authorship statement](https://github.com/atrinik/atrinik/issues/331)
+and the [replacement roadmap](https://github.com/atrinik/atrinik/issues/168)
+for the project-wide identity and implementation direction.
+
 ## M1 architecture
 
 ```text
