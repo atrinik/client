@@ -1,5 +1,10 @@
 # Independent implementation
 
+Direct human-written code contributions are welcome. The project currently
+develops software primarily through Codex-driven agentic workflows, but changes
+written by people or agents follow the same accountable review, clean-room,
+provenance, licensing, testing, and repository-validation requirements.
+
 Client code is newly authored MIT work from public specifications, observable
 behavior, interoperability facts, synthetic fixtures, independently licensed
 data, and permissive dependencies. Do not consult GPL source/tests as an
