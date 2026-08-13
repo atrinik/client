@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "source": {
+    "repository": "atrinik/synthetic-history",
+    "path": "engine/alpha.c",
+    "revision": "1111111111111111111111111111111111111111"
+  },
+  "destination": {
+    "repository": "atrinik/client",
+    "path": "crates/atrinik-client/src/main.rs"
+  },
+  "transformation": "Synthetic translation used only to verify the reference contract.",
+  "scope_binding": "psb-11111111111111111111111111111111",
+  "scope_approval": {
+    "key_id": "synthetic-reviewer-2026",
+    "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgBruVWBv4FEuaHvyX1z13qRO9BU\nTXED0DGAjTaWDx1NAAAAAVYXRyaW5pay1wcm92ZW5hbmNlLXYxAAAAAAAAAAZzaGE1MTIA\nAABTAAAAC3NzaC1lZDI1NTE5AAAAQMgjQuvAvo5r+ET7qrh0aTvzS+32y8m+YLeI3KGtSe\nt2AqlgKssz5XRgRMMSnIYwqQx9CxYG/afvB5Cbze2duQc=\n-----END SSH SIGNATURE-----"
+  },
+  "evidence_reference": {
+    "repository": "atrinik/atrinik",
+    "revision": "98ff80ef66a71d8b7c48e7d0c71029abd5c90227",
+    "record_id": "pir-c-11111111111111111111111111111111",
+    "registry_sha256": "0a04fcadccb37e64f6c1209bc0b7e8d5762639ce4c5521c3bba028d9eba037bd",
+    "schema_sha256": "34ab398af4f166b8b65ac68500b547b9ade4955bd0b73770eeda1337bf5dcf47",
+    "reviewers_sha256": "b7a44ad27cec663a9092b924a0f6a9c95bf95a2ce74cf75ba8873e7938782240",
+    "url": "https://github.com/atrinik/atrinik/blob/98ff80ef66a71d8b7c48e7d0c71029abd5c90227/governance/provenance-identities/registry.json#pir-c-11111111111111111111111111111111"
+  }
+}
