@@ -46,10 +46,16 @@
 ## Licensing and delivery
 
 - New source, tests, docs, and client fixtures are MIT. Do not add GPL/AGPL
-  implementation or dependencies. Independent behavior implementation is the
-  default; any historical grant use follows `PROVENANCE.md` and the canonical
-  `atrinik/atrinik/docs/PROVENANCE.md` registry, failing closed on incomplete or
-  mixed evidence.
+  dependencies, bundles, or unapproved GPL material. Independent implementation
+  remains the default when exact historical reuse cannot be proven. Admit reuse
+  only under `PROVENANCE.md` and the canonical
+  [`atrinik/atrinik` registry](https://github.com/atrinik/atrinik/blob/main/docs/PROVENANCE.md):
+  each selected, independently separable contribution must itself fit one
+  historical row's “original past Atrinik contributions solely authored”
+  scope. Rows do not combine for joint, agent-generated, or inseparable work;
+  later or agent-generated material needs separate contemporaneous compatible
+  rights. The Classic source stays GPL-2.0-or-later; only exact recorded
+  destination material receives MIT permission.
 - Authored media retains its exact license. Admit packaged assets only through
   a machine-readable source/author/license/digest/notice allowlist; fail on
   unknown, incompatible, or unacknowledged inputs.

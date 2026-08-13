@@ -3,7 +3,8 @@
 The fresh MIT Atrinik client is a Rust 2024/SDL3 application independent of
 `atrinik/classic`, classic libatrinik, the editor, and write-capable content
 tooling. The [replacement roadmap](https://github.com/atrinik/atrinik/issues/168)
-and [provenance policy](PROVENANCE.md) define its clean-room boundary.
+and [provenance policy](PROVENANCE.md) record that independent implementation
+history and govern any later, evidence-gated historical source reuse.
 
 ## Development model
 
