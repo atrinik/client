@@ -15,14 +15,14 @@ jq -e '
     .repository == "atrinik/client" and .path == "crates/atrinik-client/src/main.rs") and
   (.transformation | type == "string" and length > 0) and
   (.scope_approval | type == "object" and (keys | sort) == ["key_id", "signature"] and
-    .key_id == "synthetic-reviewer-2026" and
+    .key_id == "synthetic-component-reviewer-2026" and
     (.signature | test("^-----BEGIN SSH SIGNATURE-----\\n[A-Za-z0-9+/=\\n]+\\n-----END SSH SIGNATURE-----$"))) and
   (.evidence_reference | type == "object" and
     (keys | sort) == ["record_id", "registry_sha256", "repository", "reviewers_sha256", "revision", "schema_sha256", "url"] and
     .repository == "atrinik/atrinik" and
     .record_id == "pir-c-11111111111111111111111111111111" and
     ([.registry_sha256, .reviewers_sha256, .schema_sha256] | all(test("^[0-9a-f]{64}$"))) and
-    (.revision | test("^[0-9a-f]{40}$")) and
+    .revision == "6f6040212f0fa0cb6b8e4e695d1488a403d966be" and
     (. as $e | $e.url == ("https://github.com/atrinik/atrinik/blob/" + $e.revision +
       "/governance/provenance-identities/registry.json#" + $e.record_id))) and
   (.scope_binding | test("^psb-[0-9a-f]{32}$")) and
