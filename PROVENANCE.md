@@ -42,9 +42,12 @@ historical client code was copied. The language-neutral fixture manifest is
 retained byte-for-byte and independently digest-pinned.
 
 `provenance/identity-reference.synthetic.json` demonstrates the canonical
-privacy-preserving identity reference workflow for issue #57. It is
+privacy-preserving identity reference workflow for issue #386. It is newly
 reviewer-signed synthetic evidence only: it grants no permission for real
-material and copies neither the coordinator registry nor identity aliases.
+material and copies neither the coordinator registry nor identity aliases. Its
+immutable evidence reference pins coordinator commit
+`6f6040212f0fa0cb6b8e4e695d1488a403d966be`, the squash merge of coordinator
+PR #381 already reachable from canonical `origin/main`.
 `tools/check-foundations.sh` always validates the local record shape. With an
 explicit coordinator checkout it also performs bounded offline verification:
 
@@ -52,18 +55,8 @@ explicit coordinator checkout it also performs bounded offline verification:
 ATRINIK_COORDINATOR=/path/to/atrinik tools/check-foundations.sh
 ```
 
-Before coordinator PR #381 merges, audit its pushed branch without treating
-the result as approval:
-
-```sh
-ATRINIK_COORDINATOR=/path/to/atrinik \
-ATRINIK_COORDINATOR_TRUSTED_REF=origin/feat/privacy-preserving-provenance-registry \
-tools/check-provenance-identity-reference.sh
-```
-
 The record's `evidence_reference.url` is the immutable online permalink.
-This permanently synthetic demonstration remains a non-authorizing audit of
-the exact pushed feature commit. Production evidence must instead pin a
-revision already reachable from `origin/main` (or a future implemented and
-verified signed release); squash-merging PR #381 does not promote its internal
-commits to production authority.
+The default validation path loads current revocation state and reviewer
+authority from trusted `origin/main`, then reads the pinned registry, schema,
+and reviewer blobs without network access. The demonstration remains synthetic
+and therefore cannot authorize real material.
