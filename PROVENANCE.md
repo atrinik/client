@@ -12,6 +12,23 @@ rights proof was performed. `provenance/assets.json` is an empty fail-closed
 bundle allowlist. SDL and Rust dependencies are external permissive packages in
 Cargo.lock and `policy/dependencies.json`.
 
+Those historical decisions do not impose a categorical ban on later reuse of
+eligible historical Classic source. Independent implementation remains the
+default when exact historical reuse cannot be proven. Under the canonical
+[`atrinik/atrinik` registry](https://github.com/atrinik/atrinik/blob/main/docs/PROVENANCE.md),
+each selected, independently separable contribution must itself fit one
+applicable row's “original past Atrinik contributions solely authored” scope.
+Historical rows cannot be combined to cover a jointly authored contribution,
+agent-generated output, or inseparable mixed work; later or agent-generated
+material needs its own contemporaneous compatible rights. Complete,
+rename-aware history, identity, embedded-material, separability,
+transformation, reviewer, and destination-record evidence is required. Tests,
+fixtures, generated output, assets, and dependency code receive no presumption
+of coverage, and this source-reuse route does not permit GPL/AGPL dependencies
+or bundles. The checked-in Classic distribution remains GPL-2.0-or-later; MIT
+permission applies only to the exact selected destination material recorded by
+the review.
+
 Future protocol bindings may be generated only from a released MIT
 `atrinik/protocol` contract with pinned generator/drift evidence. Future scene
 integration may use only a released `atrinik/renderer` crate. Neither is replaced
