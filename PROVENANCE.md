@@ -40,3 +40,30 @@ revision `8942912d55bc571213836bf1ad4ae7663d60b2a4`, plus public HTTP/R2
 interoperability facts. No protocol implementation, classic source, or
 historical client code was copied. The language-neutral fixture manifest is
 retained byte-for-byte and independently digest-pinned.
+
+`provenance/identity-reference.synthetic.json` demonstrates the canonical
+privacy-preserving identity reference workflow for issue #57. It is
+reviewer-signed synthetic evidence only: it grants no permission for real
+material and copies neither the coordinator registry nor identity aliases.
+`tools/check-foundations.sh` always validates the local record shape. With an
+explicit coordinator checkout it also performs bounded offline verification:
+
+```sh
+ATRINIK_COORDINATOR=/path/to/atrinik tools/check-foundations.sh
+```
+
+Before coordinator PR #381 merges, audit its pushed branch without treating
+the result as approval:
+
+```sh
+ATRINIK_COORDINATOR=/path/to/atrinik \
+ATRINIK_COORDINATOR_TRUSTED_REF=origin/feat/privacy-preserving-provenance-registry \
+tools/check-provenance-identity-reference.sh
+```
+
+The record's `evidence_reference.url` is the immutable online permalink.
+This permanently synthetic demonstration remains a non-authorizing audit of
+the exact pushed feature commit. Production evidence must instead pin a
+revision already reachable from `origin/main` (or a future implemented and
+verified signed release); squash-merging PR #381 does not promote its internal
+commits to production authority.

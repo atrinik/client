@@ -11,6 +11,7 @@ jq -e '
 ' migration/behavior-parity.json >/dev/null
 jq -e '.schema_version == 1 and ([.records[].status] | index("migrated") != null and index("excluded") != null) and ([.records[] | select(.grant_used == true)] | length == 0)' provenance/reuse.json >/dev/null
 jq -e '.schema_version == 1 and .assets == []' provenance/assets.json >/dev/null
+tools/test-provenance-identity-reference.sh
 
 if grep -RhE '^[[:space:]]*uses:' .github/workflows 2>/dev/null | grep -Ev '@[0-9a-f]{40}([[:space:]]|$)' >/dev/null; then
   echo "workflow action is not pinned to an immutable commit" >&2
