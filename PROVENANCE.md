@@ -62,3 +62,8 @@ tools/check-provenance-identity-reference.sh
 ```
 
 The record's `evidence_reference.url` is the immutable online permalink.
+This permanently synthetic demonstration remains a non-authorizing audit of
+the exact pushed feature commit. Production evidence must instead pin a
+revision already reachable from `origin/main` (or a future implemented and
+verified signed release); squash-merging PR #381 does not promote its internal
+commits to production authority.
