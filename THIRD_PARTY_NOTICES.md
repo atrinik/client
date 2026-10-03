@@ -7,7 +7,7 @@ Resolved versions are recorded only in `Cargo.lock`.
 | --- | --- | --- | --- |
 | `atrinik-protocol` | none | `MIT` | https://crates.io/crates/atrinik-protocol |
 | `httpdate` | none | `MIT OR Apache-2.0` | https://crates.io/crates/httpdate |
-| `sdl3` | SDL 3.4.14 | `MIT AND Zlib` | https://crates.io/crates/sdl3 |
+| `sdl3` | SDL 3.4.18 | `MIT AND Zlib` | https://crates.io/crates/sdl3 |
 | `sha2` | none | `MIT OR Apache-2.0` | https://crates.io/crates/sha2 |
 | `ureq` | none | `MIT OR Apache-2.0` | https://crates.io/crates/ureq |
 
