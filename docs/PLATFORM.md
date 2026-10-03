@@ -1,6 +1,6 @@
 # SDL3 platform contract
 
-SDL 3.4.14 comes from `sdl3-src` through the Cargo-locked `sdl3` 0.18.4.
+SDL 3.4.18 comes from `sdl3-src` through the Cargo-locked `sdl3` 0.20.0.
 Linux and Windows use static source builds so clean clones do not depend on an
 unversioned system SDL. Packages record the SDL license/notice and native graph.
 

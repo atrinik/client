@@ -57,7 +57,7 @@ configured direct connections. See the [directory contract](docs/DIRECTORY.md).
 
 ## Build and test
 
-Rust 1.97.1 is pinned. SDL 3.4.14 is acquired reproducibly from the checksummed
+Rust 1.97.1 is pinned. SDL 3.4.18 is acquired reproducibly from the checksummed
 `sdl3-src` crate and linked statically; no ambient system SDL is selected.
 Linux builders need the desktop, audio, input, and GPU development headers
 listed in `tools/install-linux-native-deps.sh`; CI installs them from the
@@ -86,8 +86,8 @@ existing tagged release without rebuilding from another revision.
 
 | Target | SDL3 | Window validation | Renderer backend |
 | --- | --- | --- | --- |
-| Linux x86-64 | 3.4.14 static source build | headless dummy plus optional desktop window | Vulkan contract recorded; exercised when released renderer lands |
-| Windows x86-64 MSVC | 3.4.14 static source build | compile/tests in CI; interactive smoke on release host | D3D12 contract recorded; exercised when released renderer lands |
+| Linux x86-64 | 3.4.18 static source build | headless dummy plus optional desktop window | Vulkan contract recorded; exercised when released renderer lands |
+| Windows x86-64 MSVC | 3.4.18 static source build | compile/tests in CI; interactive smoke on release host | D3D12 contract recorded; exercised when released renderer lands |
 
 Logical UI coordinates are integer-independent from physical pixels; SDL display
 scale is represented as bounded thousandths. Focus, suspend, full-screen,

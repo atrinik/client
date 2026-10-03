@@ -20,7 +20,7 @@ git archive --format=tar --prefix="atrinik-client-${version}/" HEAD | gzip -n >"
 SYFT_CHECK_FOR_APP_UPDATE=false syft dir:"${stage}" --source-name atrinik-client --source-version "${version}" --output "cyclonedx-json=${output}/atrinik-client-${version}-linux-amd64.sbom.cdx.json"
 if grep -Eiq 'AGPL-[123]|GPL-[123]' "${output}/atrinik-client-${version}-linux-amd64.sbom.cdx.json"; then echo "forbidden reciprocal license in SBOM" >&2; exit 1; fi
 if [[ $(jq '.components | length' "${output}/atrinik-client-${version}-linux-amd64.sbom.cdx.json") -lt 10 ]]; then echo "release SBOM is missing the effective Rust graph" >&2; exit 1; fi
-jq -n --arg version "${version}" --arg revision "${revision}" --arg rust "$(rustc --version)" '{schema_version:1,version:$version,revision:$revision,target:"x86_64-unknown-linux-gnu",rust:$rust,sdl:"3.4.14 static",protocol:"game-protocol-1",renderer:"scene-snapshot-1",symbols:"stripped; private symbol packages begin in M6"}' >"${output}/atrinik-client-${version}-linux-amd64.provenance.json"
+jq -n --arg version "${version}" --arg revision "${revision}" --arg rust "$(rustc --version)" '{schema_version:1,version:$version,revision:$revision,target:"x86_64-unknown-linux-gnu",rust:$rust,sdl:"3.4.18 static",protocol:"game-protocol-1",renderer:"scene-snapshot-1",symbols:"stripped; private symbol packages begin in M6"}' >"${output}/atrinik-client-${version}-linux-amd64.provenance.json"
 (
   cd "${output}"
   sha256sum "atrinik-client-${version}-linux-amd64.tar.gz" "atrinik-client-${version}-linux-amd64.sbom.cdx.json" "atrinik-client-${version}-linux-amd64.provenance.json" "atrinik-client-${version}-source.tar.gz" >"atrinik-client-${version}-linux-amd64.SHA256SUMS"
