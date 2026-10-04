@@ -1,0 +1,74 @@
+{
+  "fixture_version": 2,
+  "schema": "atrinik-game-directory-v2",
+  "positive": {
+    "json": "metaserver-directory-v2/canonical.json",
+    "xml": "metaserver-directory-v2/projection.xml",
+    "projection_semantics": "metaserver-directory-v2/projection-semantics.json",
+    "body_sha256": "4fa5013b204c97668b8a3ff719b5b0aaa33dbe8b5cf90d2e90bb436a91d406fa",
+    "http_strong_etag": "\"0123456789abcdef0123456789abcdef\""
+  },
+  "negative": [
+    {
+      "file": "metaserver-directory-v2/negative-unsupported-schema.json",
+      "error": "unsupported_schema"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-zero-generation.json",
+      "error": "invalid_generation"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-expired-at-generation.json",
+      "error": "invalid_freshness"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-identity-mismatch.json",
+      "error": "invalid_identity"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-numeric-endpoint.json",
+      "error": "invalid_endpoint"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-invalid-alabel.json",
+      "error": "invalid_endpoint"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-status-count.json",
+      "error": "invalid_status"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-unordered-servers.json",
+      "error": "unordered_servers"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-duplicate-server.json",
+      "error": "unordered_servers"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-noncanonical-whitespace.json",
+      "error": "noncanonical_json"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-private-field.json",
+      "error": "noncanonical_json"
+    },
+    {
+      "file": "metaserver-directory-v2/negative-xml-noncharacter.json",
+      "error": "invalid_text"
+    }
+  ],
+  "maximum_bounds": {
+    "body_bytes": 262144,
+    "servers": 512,
+    "name_utf8_bytes": 80,
+    "description_utf8_bytes": 512,
+    "region_bytes": 32,
+    "content_id_bytes": 64,
+    "players": 100000,
+    "hostname_bytes": 253,
+    "port": 65535,
+    "snapshot_lifetime_seconds": 14400,
+    "http_etag_bytes": 128
+  }
+}

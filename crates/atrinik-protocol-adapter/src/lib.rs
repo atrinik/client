@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 //! Boundary where future released Game Protocol 1 messages are validated.
 
+pub mod access;
 pub mod directory;
+pub mod trust;
 
 use atrinik_actions::ObjectHandle;
 use atrinik_session::{Entity, Event, RevisionedEvent, SessionError};

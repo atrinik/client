@@ -1,11 +1,24 @@
 # Protocol fixture provenance
 
-`metaserver-directory-v1.json` and `metaserver-directory-v1/` are byte-for-byte
-test inputs from `atrinik/protocol` revision
-`8942912d55bc571213836bf1ad4ae7663d60b2a4`, released in protocol v1.5.3.
-They are MIT language-neutral conformance data, not a copied implementation.
-The pinned `atrinik-protocol` 0.1.0 crate still owns the schema parser; the
-v1.5.3 language-neutral fixture owns the independent body digest and opaque
-HTTP-validator vectors. Client checks pin the manifest digest and every
-negative error code so fixture drift requires an explicit protocol dependency
-review.
+`metaserver-directory-v2.json`, `metaserver-directory-v2/`, and
+`access-resolve-v1/canonical.json` are byte-for-byte inputs from
+`atrinik/protocol` access-token candidate revision
+`1584053ee5f5bb1d96b59ff85f4035579bc17617`, governed by the service-origin
+clarification at `b7c8d22ed9acd53bf31818bca5eda10a6f51d3e2` and its normative
+specification SHA-256
+`1f09123f8432b6bbfb0bfed35ebe7e00df9dbe822e5126cd363f8c681553d872`.
+An immutable `atrinik-protocol` 0.2.0 registry release remains required before
+pull-request readiness; a sibling path override is used only for task-local
+validation.
+
+`access-resolve-v1/synthetic-p256.der` is the decoded certificate from the same
+protocol producer's synthetic game publisher and resolve fixtures. Its leaf DER
+SHA-256 is
+`0d61dae94226a68c2452598898d33ef8eb97a73a040294825c2eedb01d6aee40`;
+its separately encoded SubjectPublicKeyInfo SHA-256 is
+`5cd252fb0ce8932436faf8ccd1040981b89ee4ad6b9fe9e2a2b7e71aacb27cd3`.
+The values are public test identities and contain no private key.
+
+These files are MIT language-neutral conformance data, not copied
+implementations. Client checks pin their digests so fixture drift requires an
+explicit protocol dependency and trust-boundary review.

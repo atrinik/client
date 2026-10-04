@@ -1,11 +1,11 @@
 //! Bounded adapter from the released static-directory wire model to client data.
 
-use atrinik_protocol::metaserver::directory::{
+use atrinik_protocol::metaserver::directory_v2::{
     DirectoryError as ProtocolDirectoryError, MAXIMUM_DIRECTORY_BODY_BYTES,
     MAXIMUM_DIRECTORY_FUTURE_SKEW, MAXIMUM_DIRECTORY_SERVERS, directory_server_compatible,
     parse_directory_json,
 };
-use atrinik_protocol::metaserver::v1::{
+use atrinik_protocol::metaserver::v2::{
     DirectEndpoint as ProtocolEndpoint, DirectoryServer as ProtocolServer,
     DirectoryServerStatus as ProtocolStatus,
 };
@@ -197,7 +197,7 @@ pub struct DirectoryServer {
     pub players_online: u32,
     pub players_capacity: u32,
     pub status: DirectoryServerStatus,
-    pub password_required: bool,
+    pub access_required: bool,
     pub endpoint: Option<DirectEndpoint>,
 }
 
@@ -273,7 +273,7 @@ fn convert_server(server: ProtocolServer) -> Result<DirectoryServer, DirectoryVa
         players_online: server.players_online,
         players_capacity: server.players_capacity,
         status,
-        password_required: server.password_required,
+        access_required: server.access_required,
         endpoint,
     })
 }
@@ -331,11 +331,13 @@ const fn hex_nibble(value: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use atrinik_protocol::metaserver::directory::{marshal_directory_json, parse_directory_json};
+    use atrinik_protocol::metaserver::directory_v2::{
+        marshal_directory_json, parse_directory_json,
+    };
 
     const CANONICAL: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/metaserver-directory-v1/canonical.json"
+        "/../../fixtures/metaserver-directory-v2/canonical.json"
     ));
     const CONTENT_REVISION: [u8; 32] = [0xaa; 32];
 
@@ -358,7 +360,7 @@ mod tests {
         assert_eq!(server.players_online, 3);
         assert_eq!(server.players_capacity, 64);
         assert_eq!(server.status, DirectoryServerStatus::Online);
-        assert!(!server.password_required);
+        assert!(!server.access_required);
         assert_eq!(
             server.endpoint,
             Some(DirectEndpoint {
@@ -451,84 +453,84 @@ mod tests {
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-unsupported-schema.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-unsupported-schema.json"
                 )),
                 DirectoryValidationError::UnsupportedSchema,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-zero-generation.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-zero-generation.json"
                 )),
                 DirectoryValidationError::InvalidGeneration,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-expired-at-generation.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-expired-at-generation.json"
                 )),
                 DirectoryValidationError::InvalidFreshness,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-identity-mismatch.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-identity-mismatch.json"
                 )),
                 DirectoryValidationError::InvalidIdentity,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-numeric-endpoint.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-numeric-endpoint.json"
                 )),
                 DirectoryValidationError::InvalidEndpoint,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-invalid-alabel.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-invalid-alabel.json"
                 )),
                 DirectoryValidationError::InvalidEndpoint,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-status-count.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-status-count.json"
                 )),
                 DirectoryValidationError::InvalidStatus,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-unordered-servers.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-unordered-servers.json"
                 )),
                 DirectoryValidationError::UnorderedServers,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-duplicate-server.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-duplicate-server.json"
                 )),
                 DirectoryValidationError::UnorderedServers,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-noncanonical-whitespace.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-noncanonical-whitespace.json"
                 )),
                 DirectoryValidationError::NonCanonicalJson,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-private-field.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-private-field.json"
                 )),
                 DirectoryValidationError::NonCanonicalJson,
             ),
             (
                 include_bytes!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../fixtures/metaserver-directory-v1/negative-xml-noncharacter.json"
+                    "/../../fixtures/metaserver-directory-v2/negative-xml-noncharacter.json"
                 )),
                 DirectoryValidationError::InvalidText,
             ),

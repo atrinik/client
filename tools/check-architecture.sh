@@ -14,10 +14,10 @@ jq -e '
   (deps("atrinik-session") | sort == ["atrinik-actions"]) and
   (deps("atrinik-ui-model") | sort == ["atrinik-actions", "atrinik-session"]) and
   (deps("atrinik-scene-adapter") == ["atrinik-session"]) and
-  (deps("atrinik-protocol-adapter") | sort == ["atrinik-actions", "atrinik-protocol", "atrinik-session"]) and
-  (deps("atrinik-directory") | sort == ["atrinik-protocol-adapter", "httpdate", "sha2", "ureq"]) and
+  (deps("atrinik-protocol-adapter") | sort == ["atrinik-actions", "atrinik-protocol", "atrinik-session", "sha2", "x509-cert", "zeroize"]) and
+  (deps("atrinik-directory") | sort == ["atrinik-protocol", "atrinik-protocol-adapter", "httpdate", "sha2", "ureq", "zeroize"]) and
   (deps("atrinik-platform") | sort == ["atrinik-actions", "sdl3"]) and
-  ([.packages[] | select(.source == null and (.name | startswith("atrinik-"))) | .dependencies[] | select(.source != null) | .name] | all(. == "atrinik-protocol" or . == "httpdate" or . == "sdl3" or . == "sha2" or . == "ureq"))
+  ([.workspace_members[] as $member | .packages[] | select(.id == $member) | .dependencies[] | select(.source != null) | .name] | all(. == "atrinik-protocol" or . == "httpdate" or . == "sdl3" or . == "sha2" or . == "ureq" or . == "x509-cert" or . == "zeroize"))
 ' "${metadata}" >/dev/null
 
 duplicates=$(jq -r '[.packages[] | select(.links != null) | .links] | group_by(.)[] | select(length > 1) | .[0]' "${metadata}")

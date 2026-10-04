@@ -1,5 +1,5 @@
 {
-  "schema": "atrinik-directory-v1",
+  "schema": "atrinik-game-directory-v2",
   "generation": "42",
   "generated_at": "1786219200",
   "expires_at": "1786233600",
@@ -12,7 +12,7 @@
     {"name": "Beta", "description": "", "region": null}
   ],
   "endpoint_presence": [true, false],
-  "password_required": [false, true],
+  "access_required": [false, true],
   "html": {
     "all_directory_strings_are_text": true,
     "active_content_from_directory_values": false,
