@@ -3,8 +3,10 @@
 `metaserver-directory-v2.json`, `metaserver-directory-v2/`, and
 `access-resolve-v1/canonical.json` are byte-for-byte inputs from
 `atrinik/protocol` access-token candidate revision
-`1584053ee5f5bb1d96b59ff85f4035579bc17617` governed by frozen normative specification SHA-256
-`0d469bd9fe9c4a1e814594c7248e2acf2f44711ccbc64fc953fa6ada5f3d4f43`.
+`1584053ee5f5bb1d96b59ff85f4035579bc17617`, governed by the service-origin
+clarification at `b7c8d22ed9acd53bf31818bca5eda10a6f51d3e2` and its normative
+specification SHA-256
+`1f09123f8432b6bbfb0bfed35ebe7e00df9dbe822e5126cd363f8c681553d872`.
 An immutable `atrinik-protocol` 0.2.0 registry release remains required before
 pull-request readiness; a sibling path override is used only for task-local
 validation.

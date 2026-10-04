@@ -41,6 +41,17 @@ interoperability facts. No protocol implementation, classic source, or
 historical client code was copied. The language-neutral fixture manifest is
 retained byte-for-byte and independently digest-pinned.
 
+The directory-v2, access-resolution, GP1 access-policy, and certificate trust
+consumers are newly authored from the public MIT `atrinik/protocol` access-token
+candidate fixture revision `1584053ee5f5bb1d96b59ff85f4035579bc17617` and
+the service-origin clarification at
+`b7c8d22ed9acd53bf31818bca5eda10a6f51d3e2`. The relevant normative
+specification has SHA-256
+`1f09123f8432b6bbfb0bfed35ebe7e00df9dbe822e5126cd363f8c681553d872`.
+Generated Rust bindings remain an external dependency and require an immutable
+published `atrinik-protocol` 0.2.0 release before pull-request readiness; no
+protocol implementation or historical client source was copied.
+
 `provenance/identity-reference.synthetic.json` demonstrates the canonical
 privacy-preserving identity reference workflow for issue #386. It is newly
 reviewer-signed synthetic evidence only: it grants no permission for real

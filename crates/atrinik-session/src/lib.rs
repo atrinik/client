@@ -18,6 +18,7 @@ pub enum Phase {
     #[default]
     Disconnected,
     AccessRequired,
+    AccessPending,
     Connected,
     Playing,
 }
@@ -48,6 +49,8 @@ pub struct Player {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Event {
     AccessRequired,
+    AccessAuthenticationSent,
+    AccessAccepted,
     AccessUnavailable,
     Connected,
     EnteredWorld,
@@ -192,15 +195,18 @@ impl Session {
     }
 
     fn preflight(&self, event: &Event) -> Result<(), SessionError> {
+        if is_authorized_state(event) && !matches!(self.phase, Phase::Connected | Phase::Playing) {
+            return Err(SessionError::InvalidTransition);
+        }
         match event {
-            Event::AccessRequired if self.phase != Phase::Disconnected => {
+            Event::AccessRequired | Event::Connected if self.phase != Phase::Disconnected => {
                 Err(SessionError::InvalidTransition)
             }
-            Event::AccessUnavailable if self.phase != Phase::AccessRequired => {
+            Event::AccessAuthenticationSent if self.phase != Phase::AccessRequired => {
                 Err(SessionError::InvalidTransition)
             }
-            Event::Connected
-                if !matches!(self.phase, Phase::Disconnected | Phase::AccessRequired) =>
+            Event::AccessAccepted | Event::AccessUnavailable
+                if self.phase != Phase::AccessPending =>
             {
                 Err(SessionError::InvalidTransition)
             }
@@ -292,6 +298,8 @@ impl Session {
                 self.reset_transient();
                 self.phase = Phase::AccessRequired;
             }
+            Event::AccessAuthenticationSent => self.phase = Phase::AccessPending,
+            Event::AccessAccepted => self.phase = Phase::Connected,
             Event::Connected => {
                 self.reset_transient();
                 self.phase = Phase::Connected;
@@ -469,6 +477,21 @@ impl Session {
             pending_action_ids: self.pending.keys().copied().collect(),
         }
     }
+}
+
+const fn is_authorized_state(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::PlayerStats { .. }
+            | Event::MapReset { .. }
+            | Event::EntityUpsert(_)
+            | Event::EntityRemoved(_)
+            | Event::InventoryReplay(_)
+            | Event::DialogReplaced(_)
+            | Event::QuestReplaced(_)
+            | Event::Message(_)
+            | Event::ActionResolved { .. }
+    )
 }
 
 fn validate_text(text: &str) -> Result<(), SessionError> {

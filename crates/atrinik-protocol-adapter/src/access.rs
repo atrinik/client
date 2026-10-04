@@ -10,6 +10,7 @@ use zeroize::Zeroize;
 
 const SESSION_ID_BYTES: usize = 16;
 const ACCESS_CODE_BYTES: usize = 16;
+const SUPPORTED_PROTOCOL_MINOR: u32 = 1;
 const ACCESS_ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,6 +28,12 @@ impl AccessAuthentication {
     /// Borrows the generated message only for immediate encrypted serialization.
     pub fn with_message<T>(&self, use_message: impl FnOnce(&AccessAuth) -> T) -> T {
         use_message(&self.message)
+    }
+
+    /// Returns the state transition to apply only after the encrypted write succeeds.
+    #[must_use]
+    pub const fn sent_event(&self) -> Event {
+        Event::AccessAuthenticationSent
     }
 }
 
@@ -80,7 +87,7 @@ pub fn negotiate_server_access(
         .version
         .as_ref()
         .ok_or(AccessAdapterError::UnsupportedVersion)?;
-    if version.major != 1 || version.minor < 1 {
+    if version.major != 1 || version.minor != SUPPORTED_PROTOCOL_MINOR {
         return Err(AccessAdapterError::UnsupportedVersion);
     }
     if !hello
@@ -138,7 +145,7 @@ pub fn access_auth(
 
 pub fn access_result_event(result: &AccessResult) -> Result<Event, AccessAdapterError> {
     match AccessStatus::try_from(result.status) {
-        Ok(AccessStatus::Accepted) => Ok(Event::Connected),
+        Ok(AccessStatus::Accepted) => Ok(Event::AccessAccepted),
         Ok(AccessStatus::Unavailable) => Ok(Event::AccessUnavailable),
         Ok(AccessStatus::Unspecified) | Err(_) => Err(AccessAdapterError::InvalidResult),
     }
@@ -186,13 +193,15 @@ mod tests {
 
     #[test]
     fn missing_capability_unknown_policy_and_changed_pin_fail_closed() {
+        for minor in [0, 2, u32::MAX] {
+            let mut invalid = hello(AccessPolicy::Open);
+            invalid.version = Some(ProtocolVersion { major: 1, minor });
+            assert_eq!(
+                negotiate_server_access(&invalid, &[9; 32]),
+                Err(AccessAdapterError::UnsupportedVersion)
+            );
+        }
         let mut invalid = hello(AccessPolicy::Open);
-        invalid.version = Some(ProtocolVersion { major: 1, minor: 0 });
-        assert_eq!(
-            negotiate_server_access(&invalid, &[9; 32]),
-            Err(AccessAdapterError::UnsupportedVersion)
-        );
-        invalid = hello(AccessPolicy::Open);
         invalid.capabilities.clear();
         assert_eq!(
             negotiate_server_access(&invalid, &[9; 32]),
@@ -221,11 +230,12 @@ mod tests {
             );
         });
         assert!(access_auth(b"0123456789ABCDEO", [7; SESSION_ID_BYTES]).is_err());
+        assert_eq!(auth.sent_event(), Event::AccessAuthenticationSent);
         assert_eq!(
             access_result_event(&AccessResult {
                 status: AccessStatus::Accepted as i32,
             }),
-            Ok(Event::Connected)
+            Ok(Event::AccessAccepted)
         );
         assert_eq!(
             access_result_event(&AccessResult {

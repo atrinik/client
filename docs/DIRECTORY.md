@@ -35,7 +35,7 @@ Private discovery accepts exactly one 16-character ASCII Crockford base32
 access code for a connection attempt, normalizes ASCII case and outer ASCII
 whitespace only, and derives the route capability as
 `SHA256("atrinik-access-route-v1\\0" || C)`. It sends one bounded strict `POST`
-to `https://meta.atrinik.org/v1/access/resolve`; redirects, cookies, caching,
+to `https://rendezvous.meta.atrinik.org/v1/access/resolve`; redirects, cookies, caching,
 oversized bodies, changed nonces, stale grants, noncanonical JSON, classic
 profiles, and certificate identity mismatches fail closed. The access code,
 route capability, client nonce, response grant, and private response body have
@@ -44,7 +44,9 @@ to the directory cache or placed in a URL.
 
 GP1 peers must negotiate protocol 1.1 and `ACCESS_TOKENS_V1`. The mandatory
 server access policy gates account and character actions until a protected
-connection receives an accepted, session-bound `AccessResult`. Unknown policy,
+connection has sent its encrypted, session-bound `AccessAuth` and then receives
+an accepted `AccessResult`. World and account state are rejected throughout
+that admission phase. Unknown policy,
 missing capability, changed SPKI identity, malformed session identity, and
 unsolicited or unavailable access results stop the attempt. Account
 authentication and saved-player behavior remain unchanged after acceptance.

@@ -16,7 +16,7 @@ use zeroize::Zeroize;
 pub const ACCESS_CODE_BYTES: usize = 16;
 pub const ACCESS_RESOLVE_REQUEST_BYTES: usize = 204;
 pub const ACCESS_RESOLVE_RESPONSE_BYTES_LIMIT: usize = 8 * 1024;
-pub const ACCESS_RESOLVE_URL: &str = "https://meta.atrinik.org/v1/access/resolve";
+pub const ACCESS_RESOLVE_URL: &str = "https://rendezvous.meta.atrinik.org/v1/access/resolve";
 const ACCESS_MEDIA_TYPE: &str = "application/json; charset=utf-8";
 const MAXIMUM_RESPONSE_HEADER_BYTES: usize = 8 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -385,10 +385,16 @@ fn read_bounded_body(
     let mut output = Vec::new();
     let mut buffer = [0u8; 8 * 1024];
     loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| classify_body_error(&error))?;
+        let read = match reader.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error) => {
+                output.zeroize();
+                buffer.zeroize();
+                return Err(classify_body_error(&error));
+            }
+        };
         if read == 0 {
+            buffer.zeroize();
             return Ok(output);
         }
         let next = output
@@ -397,6 +403,7 @@ fn read_bounded_body(
             .ok_or(AccessTransportError::BodyTooLarge)?;
         if next > ACCESS_RESOLVE_RESPONSE_BYTES_LIMIT {
             output.zeroize();
+            buffer.zeroize();
             return Err(AccessTransportError::BodyTooLarge);
         }
         output.extend_from_slice(&buffer[..read]);
@@ -464,6 +471,10 @@ mod tests {
 
     #[test]
     fn route_hash_and_request_match_the_language_neutral_formula() {
+        assert_eq!(
+            ACCESS_RESOLVE_URL,
+            "https://rendezvous.meta.atrinik.org/v1/access/resolve"
+        );
         let code = AccessCode::parse_user_input("0123456789ABCDEF").expect("valid code");
         let route = code.route_capability();
         let nonce = [0x5a; 32];

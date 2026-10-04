@@ -346,7 +346,9 @@ fn protected_connection_requires_access_acceptance_before_account_flow() {
         Err(SessionError::InvalidTransition)
     );
 
-    reduce(&mut session, 2, 1, Event::Connected);
+    reduce(&mut session, 2, 1, Event::AccessAuthenticationSent);
+    assert_eq!(session.snapshot().phase, Phase::AccessPending);
+    reduce(&mut session, 3, 1, Event::AccessAccepted);
     assert_eq!(session.snapshot().phase, Phase::Connected);
     session
         .dispatch(
@@ -363,27 +365,72 @@ fn protected_connection_requires_access_acceptance_before_account_flow() {
 fn unavailable_access_closes_attempt_without_reusing_its_generation() {
     let mut session = Session::default();
     reduce(&mut session, 1, 1, Event::AccessRequired);
-    reduce(&mut session, 2, 1, Event::AccessUnavailable);
+    reduce(&mut session, 2, 1, Event::AccessAuthenticationSent);
+    reduce(&mut session, 3, 1, Event::AccessUnavailable);
     assert_eq!(session.snapshot().phase, Phase::Disconnected);
 
     assert_eq!(
         session.reduce(RevisionedEvent {
-            revision: 3,
+            revision: 4,
             session_generation: 1,
-            event: Event::Connected,
+            event: Event::AccessAccepted,
         }),
         Err(SessionError::InvalidTransition)
     );
-    reduce(&mut session, 3, 2, Event::Connected);
+    reduce(&mut session, 4, 2, Event::Connected);
     assert_eq!(session.snapshot().phase, Phase::Connected);
 }
 
 #[test]
 fn access_events_are_rejected_out_of_order_atomically() {
+    let mut before_hello = Session::default();
+    let initial = before_hello.snapshot();
+    assert_eq!(
+        before_hello.reduce(RevisionedEvent {
+            revision: 1,
+            session_generation: 0,
+            event: Event::AccessAccepted,
+        }),
+        Err(SessionError::InvalidTransition)
+    );
+    assert_eq!(before_hello.snapshot(), initial);
+
+    let mut protected = Session::default();
+    reduce(&mut protected, 1, 1, Event::AccessRequired);
+    let required = protected.snapshot();
+    for event in [Event::AccessAccepted, Event::AccessUnavailable] {
+        assert_eq!(
+            protected.reduce(RevisionedEvent {
+                revision: 2,
+                session_generation: 1,
+                event,
+            }),
+            Err(SessionError::InvalidTransition)
+        );
+        assert_eq!(protected.snapshot(), required);
+    }
+    reduce(&mut protected, 2, 1, Event::AccessAuthenticationSent);
+    reduce(&mut protected, 3, 1, Event::AccessAccepted);
+    let accepted = protected.snapshot();
+    assert_eq!(
+        protected.reduce(RevisionedEvent {
+            revision: 4,
+            session_generation: 1,
+            event: Event::AccessAccepted,
+        }),
+        Err(SessionError::InvalidTransition)
+    );
+    assert_eq!(protected.snapshot(), accepted);
+
     let mut session = Session::default();
     reduce(&mut session, 1, 1, Event::Connected);
     let before = session.snapshot();
-    for event in [Event::AccessRequired, Event::AccessUnavailable] {
+    for event in [
+        Event::AccessRequired,
+        Event::AccessAuthenticationSent,
+        Event::AccessAccepted,
+        Event::AccessUnavailable,
+    ] {
         assert_eq!(
             session.reduce(RevisionedEvent {
                 revision: 2,
@@ -393,5 +440,59 @@ fn access_events_are_rejected_out_of_order_atomically() {
             Err(SessionError::InvalidTransition)
         );
         assert_eq!(session.snapshot(), before);
+    }
+}
+
+#[test]
+fn protected_admission_fences_all_authorized_state_atomically() {
+    let mut session = Session::default();
+    reduce(&mut session, 1, 1, Event::AccessRequired);
+
+    let events = vec![
+        Event::PlayerStats {
+            health: 1,
+            health_max: 1,
+        },
+        Event::MapReset { map_generation: 1 },
+        Event::EntityUpsert(Entity {
+            handle: ObjectHandle {
+                session_generation: 1,
+                map_generation: 0,
+                object_id: 1,
+                object_generation: 1,
+            },
+            x: 0,
+            y: 0,
+            name: "entity".into(),
+        }),
+        Event::EntityRemoved(ObjectHandle {
+            session_generation: 1,
+            map_generation: 0,
+            object_id: 1,
+            object_generation: 1,
+        }),
+        Event::InventoryReplay(vec![]),
+        Event::DialogReplaced("dialog".into()),
+        Event::QuestReplaced("quest".into()),
+        Event::Message("message".into()),
+        Event::ActionResolved { request_id: 1 },
+    ];
+
+    for phase_transition in [None, Some(Event::AccessAuthenticationSent)] {
+        if let Some(event) = phase_transition {
+            reduce(&mut session, 2, 1, event);
+        }
+        let before = session.snapshot();
+        for event in events.clone() {
+            assert_eq!(
+                session.reduce(RevisionedEvent {
+                    revision: before.revision + 1,
+                    session_generation: 1,
+                    event,
+                }),
+                Err(SessionError::InvalidTransition)
+            );
+            assert_eq!(session.snapshot(), before);
+        }
     }
 }
