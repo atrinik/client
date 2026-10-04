@@ -327,3 +327,71 @@ fn character_selection_is_valid_only_before_entering_world() {
         Err(SessionError::InvalidTransition)
     );
 }
+
+#[test]
+fn protected_connection_requires_access_acceptance_before_account_flow() {
+    let mut session = Session::default();
+    reduce(&mut session, 1, 1, Event::AccessRequired);
+    assert_eq!(session.snapshot().phase, Phase::AccessRequired);
+
+    let mut sink = Sink::default();
+    assert_eq!(
+        session.dispatch(
+            ActionRequest {
+                id: 1,
+                action: Action::SelectCharacter { character_id: 8 },
+            },
+            &mut sink,
+        ),
+        Err(SessionError::InvalidTransition)
+    );
+
+    reduce(&mut session, 2, 1, Event::Connected);
+    assert_eq!(session.snapshot().phase, Phase::Connected);
+    session
+        .dispatch(
+            ActionRequest {
+                id: 1,
+                action: Action::SelectCharacter { character_id: 8 },
+            },
+            &mut sink,
+        )
+        .expect("account and character flow follows access acceptance");
+}
+
+#[test]
+fn unavailable_access_closes_attempt_without_reusing_its_generation() {
+    let mut session = Session::default();
+    reduce(&mut session, 1, 1, Event::AccessRequired);
+    reduce(&mut session, 2, 1, Event::AccessUnavailable);
+    assert_eq!(session.snapshot().phase, Phase::Disconnected);
+
+    assert_eq!(
+        session.reduce(RevisionedEvent {
+            revision: 3,
+            session_generation: 1,
+            event: Event::Connected,
+        }),
+        Err(SessionError::InvalidTransition)
+    );
+    reduce(&mut session, 3, 2, Event::Connected);
+    assert_eq!(session.snapshot().phase, Phase::Connected);
+}
+
+#[test]
+fn access_events_are_rejected_out_of_order_atomically() {
+    let mut session = Session::default();
+    reduce(&mut session, 1, 1, Event::Connected);
+    let before = session.snapshot();
+    for event in [Event::AccessRequired, Event::AccessUnavailable] {
+        assert_eq!(
+            session.reduce(RevisionedEvent {
+                revision: 2,
+                session_generation: 1,
+                event,
+            }),
+            Err(SessionError::InvalidTransition)
+        );
+        assert_eq!(session.snapshot(), before);
+    }
+}

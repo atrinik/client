@@ -7,13 +7,16 @@ origin. Static reads therefore do not invoke the metaserver Worker or D1.
 
 ## Trust and compatibility
 
-`atrinik-protocol` 0.1.0 owns the canonical `atrinik-directory-v1` parser and
-all wire bounds. Generated protocol records terminate in
+`atrinik-protocol` 0.2.0 owns the canonical `atrinik-game-directory-v2` and
+`atrinik-access-resolved-v1` parsers and all wire bounds. Generated protocol records terminate in
 `atrinik-protocol-adapter`; UI and connection code receive only client-owned
-types. Every accepted server has a 32-byte server ID equal to its certificate
-SHA-256. An optional DNS hostname is only an opt-in routing hint. A discovered
-connection remains pinned to that certificate across cache reuse, hostname
-reuse, and rendezvous.
+types. Directory v2 exposes configured `accessRequired` policy and does not
+accept the historical password field. Every resolved private server has a
+32-byte server ID equal to SHA-256 of its exact canonical DER leaf certificate.
+The GP1 pin is separately SHA-256 of SubjectPublicKeyInfo DER from that same
+P-256 certificate. An optional DNS hostname is only an opt-in routing hint. A
+discovered connection remains pinned to those identities across cache reuse,
+hostname reuse, and rendezvous.
 
 The adapter filters before display against protocol major 1 plus the exact
 installed protocol minor, content ID, and content revision SHA-256. The current
@@ -26,7 +29,25 @@ Addressless compatible servers are selectable when the fixed
 `wss://rendezvous.meta.atrinik.org` v1 capability is enabled. Each connection
 attempt must create fresh signaling and socket state. Directory records never
 contain or persist candidates, tickets, authorization transcripts, invite
-capabilities, join passwords, or rendezvous tokens.
+capabilities, access codes, route capabilities, grants, or rendezvous tokens.
+
+Private discovery accepts exactly one 16-character ASCII Crockford base32
+access code for a connection attempt, normalizes ASCII case and outer ASCII
+whitespace only, and derives the route capability as
+`SHA256("atrinik-access-route-v1\\0" || C)`. It sends one bounded strict `POST`
+to `https://meta.atrinik.org/v1/access/resolve`; redirects, cookies, caching,
+oversized bodies, changed nonces, stale grants, noncanonical JSON, classic
+profiles, and certificate identity mismatches fail closed. The access code,
+route capability, client nonce, response grant, and private response body have
+no logging traits and use best-effort buffer clearing. They are never written
+to the directory cache or placed in a URL.
+
+GP1 peers must negotiate protocol 1.1 and `ACCESS_TOKENS_V1`. The mandatory
+server access policy gates account and character actions until a protected
+connection receives an accepted, session-bound `AccessResult`. Unknown policy,
+missing capability, changed SPKI identity, malformed session identity, and
+unsolicited or unavailable access results stop the attempt. Account
+authentication and saved-player behavior remain unchanged after acceptance.
 
 ## Fetch and resource bounds
 
@@ -80,10 +101,12 @@ inherits hostname or identity data from a stale directory.
 
 ## Conformance and validation
 
-`fixtures/metaserver-directory-v1.json` and its corpus are byte-identical test
-data from `atrinik/protocol` revision
-`8942912d55bc571213836bf1ad4ae7663d60b2a4` (v1.5.3). Tests consume the
-positive vector, every declared negative error, the 512-server maximum, truncations,
-deterministic mutations, metadata/cache failure matrices, 200/304/offline/stale
-transitions, addressless rendezvous planning, and certificate pinning. Run the
-complete repository gate with `tools/validate.sh`.
+`fixtures/metaserver-directory-v2.json`, its corpus, and
+`fixtures/access-resolve-v1/canonical.json` are byte-identical protocol-producer
+test data for the 0.2.0 contract. Tests consume the positive vectors, every
+declared directory negative error, the 512-server maximum, truncations,
+deterministic mutations, access request/response bounds, DER-leaf versus SPKI
+identity derivation, GP1 state transitions, metadata/cache failure matrices,
+200/304/offline/stale transitions, addressless rendezvous planning, and
+certificate pinning. Run the complete repository gate with
+`tools/validate.sh` after the immutable 0.2.0 dependency is available.

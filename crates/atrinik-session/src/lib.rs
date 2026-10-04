@@ -17,6 +17,7 @@ const MAX_COORDINATE: i32 = 1_000_000;
 pub enum Phase {
     #[default]
     Disconnected,
+    AccessRequired,
     Connected,
     Playing,
 }
@@ -46,6 +47,8 @@ pub struct Player {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Event {
+    AccessRequired,
+    AccessUnavailable,
     Connected,
     EnteredWorld,
     Disconnected,
@@ -170,8 +173,9 @@ impl Session {
         {
             return Err(SessionError::RevisionGap);
         }
-        let connecting = matches!(incoming.event, Event::Connected);
-        if connecting {
+        let starting = matches!(incoming.event, Event::Connected | Event::AccessRequired);
+        let begins_generation = starting && self.phase == Phase::Disconnected;
+        if begins_generation {
             if self.phase != Phase::Disconnected || incoming.session_generation <= self.generation {
                 return Err(SessionError::InvalidTransition);
             }
@@ -181,7 +185,7 @@ impl Session {
         self.preflight(&incoming.event)?;
         self.commit(incoming.event);
         self.revision = incoming.revision;
-        if connecting {
+        if begins_generation {
             self.generation = incoming.session_generation;
         }
         Ok(())
@@ -189,7 +193,15 @@ impl Session {
 
     fn preflight(&self, event: &Event) -> Result<(), SessionError> {
         match event {
-            Event::Connected if self.phase != Phase::Disconnected => {
+            Event::AccessRequired if self.phase != Phase::Disconnected => {
+                Err(SessionError::InvalidTransition)
+            }
+            Event::AccessUnavailable if self.phase != Phase::AccessRequired => {
+                Err(SessionError::InvalidTransition)
+            }
+            Event::Connected
+                if !matches!(self.phase, Phase::Disconnected | Phase::AccessRequired) =>
+            {
                 Err(SessionError::InvalidTransition)
             }
             Event::EnteredWorld if self.phase != Phase::Connected => {
@@ -276,12 +288,16 @@ impl Session {
 
     fn commit(&mut self, event: Event) {
         match event {
+            Event::AccessRequired => {
+                self.reset_transient();
+                self.phase = Phase::AccessRequired;
+            }
             Event::Connected => {
                 self.reset_transient();
                 self.phase = Phase::Connected;
             }
             Event::EnteredWorld => self.phase = Phase::Playing,
-            Event::Disconnected => {
+            Event::AccessUnavailable | Event::Disconnected => {
                 self.reset_transient();
                 self.phase = Phase::Disconnected;
             }
