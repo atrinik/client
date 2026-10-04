@@ -43,10 +43,12 @@ no logging traits and use best-effort buffer clearing. They are never written
 to the directory cache or placed in a URL.
 
 GP1 peers must negotiate protocol 1.1 and `ACCESS_TOKENS_V1`. The mandatory
-server access policy gates account and character actions until a protected
-connection has sent its encrypted, session-bound `AccessAuth` and then receives
-an accepted `AccessResult`. World and account state are rejected throughout
-that admission phase. Unknown policy,
+client hello is constructed as the exact current 1.1 access offer and validated
+through the shared protocol contract immediately before encrypted send. The
+mandatory server access policy gates account and character actions until a
+protected connection has sent its encrypted, session-bound `AccessAuth` and
+then receives an accepted `AccessResult`. World and account state are rejected
+throughout that admission phase. Unknown policy,
 missing capability, changed SPKI identity, malformed session identity, and
 unsolicited or unavailable access results stop the attempt. Account
 authentication and saved-player behavior remain unchanged after acceptance.

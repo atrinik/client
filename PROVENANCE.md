@@ -48,6 +48,8 @@ the service-origin clarification at
 `b7c8d22ed9acd53bf31818bca5eda10a6f51d3e2`. The relevant normative
 specification has SHA-256
 `1f09123f8432b6bbfb0bfed35ebe7e00df9dbe822e5126cd363f8c681553d872`.
+The shared client access-offer validator is consumed from reviewed protocol
+candidate revision `e48902dc3cb7051e589c48fdb448af3433c12ac6`.
 Generated Rust bindings remain an external dependency and require an immutable
 published `atrinik-protocol` 0.2.0 release before pull-request readiness; no
 protocol implementation or historical client source was copied.

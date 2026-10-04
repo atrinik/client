@@ -1,8 +1,10 @@
 //! Bounded GP1 access negotiation at the generated-contract boundary.
 
 use atrinik_protocol::game::v1::{
-    AccessAuth, AccessPolicy, AccessResult, AccessStatus, Capability, ServerHello, SessionId,
+    AccessAuth, AccessPolicy, AccessResult, AccessStatus, Capability, ClientHello, Platform,
+    ProtocolVersion, ServerHello, SessionId,
 };
+use atrinik_protocol::validation;
 use atrinik_session::Event;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -17,6 +19,27 @@ const ACCESS_ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 pub struct AccessNegotiation {
     pub session_id: [u8; SESSION_ID_BYTES],
     pub event: Event,
+}
+
+/// A validated GP1 1.1 access offer for immediate encrypted serialization.
+pub struct AccessClientHello {
+    message: ClientHello,
+}
+
+impl AccessClientHello {
+    /// Borrows the shared-contract-validated offer only for its immediate send.
+    pub fn with_message<T>(&self, send: impl FnOnce(&ClientHello) -> T) -> T {
+        send(&self.message)
+    }
+}
+
+impl Drop for AccessClientHello {
+    fn drop(&mut self) {
+        let bytes = std::mem::take(&mut self.message.client_nonce);
+        if let Ok(mut bytes) = bytes.try_into_mut() {
+            bytes.as_mut().zeroize();
+        }
+    }
 }
 
 /// A session-bound GP1 credential message whose code bytes are never printable.
@@ -54,6 +77,7 @@ impl Drop for AccessAuthentication {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AccessAdapterError {
+    InvalidClientHello,
     UnsupportedVersion,
     MissingCapability,
     InvalidPolicy,
@@ -66,6 +90,7 @@ pub enum AccessAdapterError {
 impl Display for AccessAdapterError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
+            Self::InvalidClientHello => "client access offer is invalid",
             Self::UnsupportedVersion => "server does not support GP1 access negotiation",
             Self::MissingCapability => "server omitted the access-token capability",
             Self::InvalidPolicy => "server access policy is invalid",
@@ -78,6 +103,34 @@ impl Display for AccessAdapterError {
 }
 
 impl Error for AccessAdapterError {}
+
+/// Constructs the current client's exact access offer and validates it through
+/// the shared protocol contract before the caller can serialize or send it.
+pub fn access_client_hello(
+    client_nonce: [u8; 32],
+) -> Result<AccessClientHello, AccessAdapterError> {
+    let platform = if cfg!(target_os = "linux") {
+        Platform::Linux
+    } else if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else {
+        return Err(AccessAdapterError::InvalidClientHello);
+    };
+    let message = ClientHello {
+        version: Some(ProtocolVersion {
+            major: 1,
+            minor: SUPPORTED_PROTOCOL_MINOR,
+        }),
+        capabilities: vec![Capability::AccessTokensV1 as i32],
+        locale: "en".to_owned(),
+        platform: platform as i32,
+        build_id: env!("CARGO_PKG_VERSION").to_owned(),
+        client_nonce: client_nonce.to_vec().into(),
+    };
+    validation::access_client_hello(&message)
+        .map_err(|_| AccessAdapterError::InvalidClientHello)?;
+    Ok(AccessClientHello { message })
+}
 
 pub fn negotiate_server_access(
     hello: &ServerHello,
@@ -154,7 +207,29 @@ pub fn access_result_event(result: &AccessResult) -> Result<Event, AccessAdapter
 #[cfg(test)]
 mod tests {
     use super::*;
-    use atrinik_protocol::game::v1::{Digest256, ProtocolVersion};
+    use atrinik_protocol::game::v1::Digest256;
+
+    #[test]
+    fn constructed_client_hello_is_the_validated_access_offer() {
+        let hello = access_client_hello([5; 32]).expect("validated hello");
+        hello.with_message(|message| {
+            assert_eq!(
+                message.version,
+                Some(ProtocolVersion { major: 1, minor: 1 })
+            );
+            assert_eq!(message.capabilities, [Capability::AccessTokensV1 as i32]);
+            assert_eq!(message.locale, "en");
+            let expected_platform = if cfg!(target_os = "windows") {
+                Platform::Windows
+            } else {
+                Platform::Linux
+            };
+            assert_eq!(message.platform, expected_platform as i32);
+            assert_eq!(message.build_id, env!("CARGO_PKG_VERSION"));
+            assert_eq!(message.client_nonce.as_ref(), &[5; 32]);
+            assert_eq!(validation::access_client_hello(message), Ok(()));
+        });
+    }
 
     fn hello(policy: AccessPolicy) -> ServerHello {
         ServerHello {
