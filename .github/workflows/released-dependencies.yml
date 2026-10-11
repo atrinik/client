@@ -39,7 +39,8 @@ jobs:
           REGISTRY_READ_TOKEN: ${{ github.token }}
           BUILD_IMAGE: ghcr.io/atrinik/linux-build:1.10.0@sha256:7904a1802054662b0ede5b55de72e4c92b0112a3c211125f994ed6c62e9ec9d8
         run: |
-          export DOCKER_CONFIG="$(mktemp -d "${RUNNER_TEMP}/dependency-registry-auth.XXXXXX")"
+          DOCKER_CONFIG="$(mktemp -d "${RUNNER_TEMP}/dependency-registry-auth.XXXXXX")"
+          export DOCKER_CONFIG
           trap 'rm -rf -- "${DOCKER_CONFIG}"' EXIT
           printf '%s' "${REGISTRY_READ_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           docker pull "${BUILD_IMAGE}"
