@@ -280,6 +280,22 @@ def branch_head(repo, branch):
     return exact[0]['object']['sha']
 
 
+def update_ref(repository_id, branch, before, after):
+    """Atomically fence the exact old ref, including absence for creation."""
+    require(branch == 'automation/released-crate-dependencies', 'unexpected updater branch')
+    before = before or '0' * 40
+    require(re.fullmatch('[0-9a-f]{40}', before) and re.fullmatch('[0-9a-f]{40}', after) and
+            after != '0' * 40, 'invalid ref update identity')
+    query = 'mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { clientMutationId } }'
+    result = gh_api('graphql', 'POST', {'query': query, 'variables': {'input': {
+        'repositoryId': repository_id,
+        'refUpdates': [{'name': 'refs/heads/' + branch, 'beforeOid': before,
+                        'afterOid': after, 'force': False}]}}})
+    require(not result.get('errors') and
+            isinstance((result.get('data') or {}).get('updateRefs'), dict),
+            'atomic branch update rejected; preserving concurrent branch state')
+
+
 def updated_manifest(text, policy, records):
     """Derive only policy pin/source changes, preserving declaration options."""
     manifest = tomllib.loads(text)
@@ -419,6 +435,9 @@ def publish(root, output, policy):
     bot = 'atrinik-crate-dependency-update[bot]'
     installation = gh_api('installation/repositories?per_page=100')
     require(installation['total_count'] == 1 and any(item['full_name'] == repo and item['id'] == policy['repository_id'] for item in installation['repositories']), 'unexpected App installation scope')
+    repository_id = next(item['node_id'] for item in installation['repositories']
+                         if item['full_name'] == repo and item['id'] == policy['repository_id'])
+    require(isinstance(repository_id, str) and 0 < len(repository_id) <= 128, 'invalid App repository node identity')
     main = gh_api(f'repos/{repo}/git/ref/heads/main')['object']['sha']
     require(main == candidate['base'] and run('git', 'rev-parse', 'HEAD', cwd=root) == main, 'main advanced; rerun credential-free preparation')
     require(not run('git', 'status', '--porcelain', '--untracked-files=all', cwd=root), 'trusted publisher checkout is dirty')
@@ -466,23 +485,19 @@ def publish(root, output, policy):
     parents = [main] if previous_head is None else list(dict.fromkeys([main, previous_head]))
     update = gh_api(f'repos/{repo}/git/commits', 'POST', {'message': candidate['title'], 'tree': tree['sha'], 'parents': parents})
     require(gh_api(f'repos/{repo}/git/ref/heads/main')['object']['sha'] == main, 'main advanced before branch mutation')
-    if mode == 'create':
-        gh_api(f'repos/{repo}/git/refs', 'POST', {'ref': 'refs/heads/' + branch, 'sha': update['sha']})
-    elif mode == 'owned':
+    if mode == 'owned':
         fresh = gh_api(f'repos/{repo}/pulls/{pr["number"]}')
         require(fresh.get('state') == 'open' and fresh.get('base', {}).get('ref') == 'main' and
                 fresh['user']['login'] == bot and fresh['head']['sha'] == pr['head']['sha'] and
                 fresh['head']['ref'] == branch and (fresh['head'].get('repo') or {}).get('full_name') == repo,
                 'owned bot PR changed before mutation')
         require(gh_api(f'repos/{repo}/git/ref/heads/{branch}')['object']['sha'] == pr['head']['sha'], 'bot branch advanced')
-        # Previous bot commit is a parent, so a concurrent replacement cannot fast-forward.
-        gh_api(f'repos/{repo}/git/refs/heads/{branch}', 'PATCH', {'sha': update['sha'], 'force': False})
-    else:
+    elif mode == 'reuse':
         fresh_pulls = gh_api(f'repos/{repo}/pulls?state=open&per_page=100')
         fresh_mode, _ = choose_pr(fresh_pulls, branch, bot, repo)
         require(fresh_mode == 'create', 'stale branch acquired an open PR; rerun publisher')
         require(branch_head(repo, branch) == previous_head, 'bot branch advanced')
-        gh_api(f'repos/{repo}/git/refs/heads/{branch}', 'PATCH', {'sha': update['sha'], 'force': False})
+    update_ref(repository_id, branch, previous_head, update['sha'])
     if mode in {'create', 'reuse'}:
         gh_api(f'repos/{repo}/pulls', 'POST', {'title': candidate['title'], 'head': branch,
                'base': 'main', 'body': 'Updates exact released registry dependencies and Cargo.lock.\n\nSource release provenance, crates.io API/index/archive checksums, and credential-free Cargo resolution passed. Required application CI and review must pass before merge. No automatic merge.'})

@@ -83,7 +83,7 @@ class OwnershipTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'candidate.json').write_text(json.dumps({'repository': 'atrinik/client', 'base': 'a' * 40}))
-            responses = [{'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1}]},
+            responses = [{'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1, 'node_id': 'R_client_fixture'}]},
                          {'object': {'sha': 'b' * 40}}]
             with patch.dict(updater.os.environ, {'CRATE_DEPENDENCY_UPDATE_APP_SLUG': 'atrinik-crate-dependency-update'}), patch.object(updater, 'gh_api', side_effect=responses), self.assertRaisesRegex(ValueError, 'main advanced'):
                 updater.publish(root, root, {'repository': 'atrinik/client', 'repository_id': 1})
@@ -433,7 +433,7 @@ class PublisherRaceTests(unittest.TestCase):
             def api(endpoint, method='GET', body=None):
                 calls.append((endpoint, method, body))
                 if endpoint.startswith('installation/'):
-                    return {'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1}]}
+                    return {'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1, 'node_id': 'R_client_fixture'}]}
                 if endpoint.endswith('/git/ref/heads/main'):
                     count = sum(call[0] == endpoint for call in calls)
                     return {'object': {'sha': candidate['base'] if count == 1 or owned else 'b' * 40}}
@@ -466,7 +466,7 @@ class PublisherRaceTests(unittest.TestCase):
             expected = 'owned bot PR changed' if owned else 'main advanced before branch mutation'
             with patch.dict(updater.os.environ, {'CRATE_DEPENDENCY_UPDATE_APP_SLUG': 'atrinik-crate-dependency-update'}), patch.object(updater, 'verify_candidate'), patch.object(updater, 'verify_owned_head'), patch.object(updater, 'run', side_effect=run), patch.object(updater, 'gh_api', side_effect=api), self.assertRaisesRegex(ValueError, expected):
                 updater.publish(root, output, policy)
-            self.assertFalse(any('/git/refs' in endpoint and method != 'GET' for endpoint, method, body in calls))
+            self.assertFalse(any((endpoint == 'graphql' or '/git/refs' in endpoint) and method != 'GET' for endpoint, method, body in calls))
             self.assertFalse(any('/pulls' in endpoint and method != 'GET' for endpoint, method, body in calls))
 
     def test_main_advances_before_ref_write(self):
@@ -539,7 +539,7 @@ class PublisherReviewRegressionTests(unittest.TestCase):
             def api(endpoint, method='GET', body=None):
                 calls.append((endpoint, method, body))
                 if endpoint.startswith('installation/'):
-                    return {'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1}]}
+                    return {'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1, 'node_id': 'R_client_fixture'}]}
                 if endpoint.endswith('/git/ref/heads/main'):
                     return {'object': {'sha': candidate['base']}}
                 if '/pulls?' in endpoint:
@@ -555,6 +555,8 @@ class PublisherReviewRegressionTests(unittest.TestCase):
                     self.assertFalse(deleted_fork or other_base, 'unavailable or wrong-base PR should not be fetched')
                     data = b'[workspace.dependencies]\natrinik-protocol="=0.1.0"\n'
                     return {'encoding': 'base64', 'size': len(data), 'content': updater.base64.b64encode(data).decode()}
+                if endpoint == 'graphql':
+                    return {'data': {'updateRefs': {'clientMutationId': None}}}
                 if method in {'POST', 'PATCH'}:
                     return {'sha': 'c' * 40}
                 if '/git/commits/' in endpoint:
@@ -575,14 +577,16 @@ class PublisherReviewRegressionTests(unittest.TestCase):
                         updater.publish(root, output, policy)
                 else:
                     updater.publish(root, output, policy)
-            mutations = [call for call in calls if '/git/refs' in call[0] and call[1] != 'GET']
+            mutations = [call for call in calls if (call[0] == 'graphql' or '/git/refs' in call[0]) and call[1] != 'GET']
             if error:
                 self.assertEqual(mutations, [])
             else:
                 self.assertEqual(len(mutations), 1)
-                self.assertEqual(mutations[0][1], 'PATCH' if retained else 'POST')
+                self.assertEqual(mutations[0][0:2], ('graphql', 'POST'))
+                update = mutations[0][2]['variables']['input']['refUpdates'][0]
+                self.assertFalse(update['force'])
+                self.assertEqual(update['beforeOid'], ('b' if retained else '0') * 40)
                 if retained:
-                    self.assertFalse(mutations[0][2]['force'])
                     ownership.assert_called_once_with('atrinik/client', {'head': {'sha': 'b' * 40}}, candidate['base'], 'atrinik-crate-dependency-update[bot]')
                     commits = [call for call in calls if call[0].endswith('/git/commits')]
                     self.assertEqual(commits[0][2]['parents'], [candidate['base'], 'b' * 40])
@@ -720,6 +724,55 @@ class MetadataRequestBudgetTests(unittest.TestCase):
         public_calls = [call.args[0] for call in fetch.call_args_list if call.args[0].startswith('https://api.github.com/')]
         self.assertEqual(len(public_calls), 9)
         self.assertEqual(len(set(public_calls)), 9)
+
+
+class AtomicRefTests(unittest.TestCase):
+    def exercise(self, expected, current, after='c' * 40, fast_forward=True, rejected=False):
+        state = {'head': current}
+        def server(endpoint, method, body):
+            self.assertEqual((endpoint, method), ('graphql', 'POST'))
+            self.assertIn('updateRefs', body['query'])
+            self.assertEqual(body['variables']['input']['repositoryId'], 'R_client_fixture')
+            updates = body['variables']['input']['refUpdates']
+            self.assertEqual(len(updates), 1)
+            update = updates[0]
+            self.assertEqual(update['name'], 'refs/heads/automation/released-crate-dependencies')
+            self.assertFalse(update['force'])
+            if update['beforeOid'] != (state['head'] or '0' * 40) or not fast_forward:
+                return {'data': {'updateRefs': None}, 'errors': [{'message': 'precondition failed'}]}
+            state['head'] = update['afterOid']
+            return {'data': {'updateRefs': {'clientMutationId': None}}}
+        with patch.object(updater, 'gh_api', side_effect=server):
+            if rejected:
+                with self.assertRaisesRegex(ValueError, 'atomic branch update rejected'):
+                    updater.update_ref('R_client_fixture', 'automation/released-crate-dependencies', expected, after)
+                self.assertEqual(state['head'], current)
+            else:
+                updater.update_ref('R_client_fixture', 'automation/released-crate-dependencies', expected, after)
+                self.assertEqual(state['head'], after)
+
+    def test_exact_old_head_fast_forward(self):
+        self.exercise('b' * 40, 'b' * 40)
+
+    def test_concurrent_ancestor_reset_rejected_even_when_fast_forward_possible(self):
+        self.exercise('b' * 40, 'a' * 40, rejected=True)
+
+    def test_non_fast_forward_rejected(self):
+        self.exercise('b' * 40, 'b' * 40, fast_forward=False, rejected=True)
+
+    def test_create_collision_preserves_concurrent_branch(self):
+        self.exercise(None, 'b' * 40, rejected=True)
+
+    def test_create_requires_absent_branch(self):
+        self.exercise(None, None)
+
+    def test_main_update_and_deletion_prohibited(self):
+        with patch.object(updater, 'gh_api') as api:
+            with self.assertRaisesRegex(ValueError, 'unexpected updater branch'):
+                updater.update_ref('R_client_fixture', 'main', 'a' * 40, 'b' * 40)
+            with self.assertRaisesRegex(ValueError, 'invalid ref update identity'):
+                updater.update_ref('R_client_fixture', 'automation/released-crate-dependencies', 'a' * 40, '0' * 40)
+        api.assert_not_called()
 
 
 if __name__ == '__main__':
