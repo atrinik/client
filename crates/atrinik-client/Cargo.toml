@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "atrinik-client"
 version.workspace = true
 edition.workspace = true

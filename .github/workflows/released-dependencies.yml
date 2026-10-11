@@ -1,0 +1,158 @@
+name: Released dependency updates
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: client-released-dependencies
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    name: Verify releases and validate candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      changed: ${{ steps.candidate.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Collect bounded public release metadata on the host
+        env:
+          GITHUB_READ_TOKEN: ${{ github.token }}
+        run: python3 tools/released_dependencies.py metadata --root . --output "${RUNNER_TEMP}/release-metadata.json"
+      - name: Test updater policy
+        env:
+          CRATE_RELEASE_METADATA_CACHE: ${{ runner.temp }}/release-metadata.json
+        run: |
+          python3 tools/released_dependencies.py ready --root .
+          python3 -m unittest discover -s tools -p 'test_released_dependencies.py'
+      - name: Prepare and validate without App credentials
+        id: candidate
+        env:
+          BUILD_IMAGE: ghcr.io/atrinik/linux-build:1.10.0@sha256:7904a1802054662b0ede5b55de72e4c92b0112a3c211125f994ed6c62e9ec9d8
+        run: |
+          install -d "${RUNNER_TEMP}/dependency-cache/prepare" \
+            "${RUNNER_TEMP}/dependency-cache/verify" \
+            "${RUNNER_TEMP}/dependency-cache/consumer" \
+            "${RUNNER_TEMP}/dependency-cache/application"
+          install -d "${RUNNER_TEMP}/dependency-artifacts"
+          sha256sum "${RUNNER_TEMP}/release-metadata.json" >"${RUNNER_TEMP}/release-metadata-seal.sha256"
+          docker pull "${BUILD_IMAGE}"
+          docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+            --mount "type=bind,source=${RUNNER_TEMP}/release-metadata.json,target=/metadata/release-metadata.json,readonly" \
+            --mount "type=bind,source=${GITHUB_WORKSPACE},target=/repo" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-artifacts,target=/artifacts" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/prepare,target=/cache" \
+            --workdir /repo --env HOME=/tmp/dependency-home \
+            --env CRATE_RELEASE_METADATA_CACHE=/metadata/release-metadata.json \
+            --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
+            --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
+              mkdir -p "$HOME"
+              python3 tools/released_dependencies.py prepare --root . --output /artifacts/candidate
+            '
+          candidate="${RUNNER_TEMP}/dependency-artifacts/candidate"
+          if test -f "${candidate}/candidate.json"; then
+            sha256sum "${candidate}/Cargo.toml" "${candidate}/Cargo.lock" "${candidate}/candidate.json" \
+              >"${RUNNER_TEMP}/dependency-candidate-seal.sha256"
+          fi
+          git clone --no-hardlinks --config core.hooksPath=/dev/null \
+            "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}/dependency-validation-source"
+          if test -f "${candidate}/candidate.json"; then
+            docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+              --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+              --mount "type=bind,source=${RUNNER_TEMP}/release-metadata.json,target=/metadata/release-metadata.json,readonly" \
+              --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
+              --mount "type=bind,source=${candidate},target=/candidate,readonly" \
+              --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/verify,target=/cache" \
+              --workdir /repo --env HOME=/tmp/dependency-home \
+              --env CRATE_RELEASE_METADATA_CACHE=/metadata/release-metadata.json \
+              --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
+              --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
+                mkdir -p "$HOME"
+                python3 tools/released_dependencies.py verify-lock --root . --candidate /candidate
+              '
+            cp "${candidate}/Cargo.toml" "${candidate}/Cargo.lock" "${RUNNER_TEMP}/dependency-validation-source/"
+            git -C "${RUNNER_TEMP}/dependency-validation-source" \
+              -c user.name=dependency-candidate -c user.email=dependency-candidate@users.noreply.github.com \
+              commit -m "chore(deps): validate registry candidate" -- Cargo.toml Cargo.lock
+          fi
+          docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+            --mount "type=bind,source=${RUNNER_TEMP}/release-metadata.json,target=/metadata/release-metadata.json,readonly" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/consumer,target=/cache" \
+            --workdir /repo --env HOME=/tmp/dependency-home \
+            --env CRATE_RELEASE_METADATA_CACHE=/metadata/release-metadata.json \
+            --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
+            --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
+              mkdir -p "$HOME"
+              python3 tools/released_dependencies.py consumer --root .
+            '
+          docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+            --mount "type=bind,source=${RUNNER_TEMP}/release-metadata.json,target=/metadata/release-metadata.json,readonly" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/application,target=/cache" \
+            --workdir /repo --env HOME=/tmp/dependency-home \
+            --env CRATE_RELEASE_METADATA_CACHE=/metadata/release-metadata.json \
+            --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
+            --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
+              mkdir -p "$HOME"
+              tools/validate-dependency-candidate.sh
+            '
+          if test -f "${candidate}/candidate.json"; then
+            sha256sum --check --strict "${RUNNER_TEMP}/dependency-candidate-seal.sha256"
+          fi
+          sha256sum --check --strict "${RUNNER_TEMP}/release-metadata-seal.sha256"
+          if test -f "${RUNNER_TEMP}/dependency-artifacts/candidate/candidate.json"; then
+            echo "changed=true" >>"${GITHUB_OUTPUT}"
+          else
+            echo "changed=false" >>"${GITHUB_OUTPUT}"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: steps.candidate.outputs.changed == 'true'
+        with:
+          name: released-dependency-candidate
+          path: ${{ runner.temp }}/dependency-artifacts/candidate
+          retention-days: 1
+          if-no-files-found: error
+  publish:
+    name: Publish reviewed dependency candidate
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: released-dependency-candidate
+          path: ${{ runner.temp }}/dependency-candidate
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          app-id: ${{ vars.CRATE_DEPENDENCY_UPDATE_APP_ID }}
+          private-key: ${{ secrets.CRATE_DEPENDENCY_UPDATE_APP_PRIVATE_KEY }}
+          owner: atrinik
+          repositories: client
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Publish only bot-owned update branch
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GITHUB_READ_TOKEN: ${{ github.token }}
+          CRATE_DEPENDENCY_UPDATE_APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: python3 tools/released_dependencies.py publish --root . --candidate "${RUNNER_TEMP}/dependency-candidate"

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "repository": "atrinik/client",
+  "dependencies": [
+    {
+      "name": "atrinik-protocol",
+      "repository": "atrinik/protocol",
+      "legacy": [
+        {
+          "version": "0.1.0",
+          "repository_release": "1.4.0",
+          "revision": "47b821a16ba955bebc79fc31e3b3bada8d74b33e",
+          "sha256": "413c4da6c1b304d4a622065efe0d36c3f591041972f1a5ee76c538926f3c0b6b"
+        },
+        {
+          "version": "0.2.0",
+          "repository_release": "2.8.0",
+          "revision": "a47537790f5ea8a08adf7e6dffee4fa794cf3665",
+          "sha256": "cda65c3c322993cfab378454fb9b1182df8a000216f4abd1170e53cdfdc3b3bb"
+        }
+      ],
+      "repository_id": 1327106950
+    }
+  ],
+  "repository_id": 1327106844
+}

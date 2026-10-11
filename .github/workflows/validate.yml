@@ -18,6 +18,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Check released dependency readiness
+        run: python3 tools/released_dependencies.py ready --root .
       - name: Install Linux native build dependencies
         run: tools/install-linux-native-deps.sh
       - name: Install pinned Rust quality tools
@@ -45,6 +47,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check released dependency readiness
+        run: python tools/released_dependencies.py ready --root .
       - run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
       - run: cargo test --locked --workspace --all-targets
       - run: cargo build --locked --release --package atrinik-client

@@ -3,6 +3,9 @@ set -euo pipefail
 repository=$(git rev-parse --show-toplevel)
 cd "${repository}"
 
+python3 -m unittest discover -s tools -p 'test_released_dependencies.py'
+python3 tools/released_dependencies.py ready --root .
+
 test "$(rustc --version | awk '{print $2}')" = 1.97.1
 for command in cargo rustc jq syft; do command -v "${command}" >/dev/null || { echo "missing required tool: ${command}" >&2; exit 1; }; done
 cargo fmt --all --check
