@@ -198,3 +198,57 @@ class LegacyLockTests(unittest.TestCase):
             (root / 'Cargo.lock').write_text(prefix + 'b' * 40 + '"\n')
             with self.assertRaisesRegex(ValueError, 'legacy Git lock mismatch'):
                 updater.lock_check(root, {NAME: {'version': '0.1.0', 'legacy_git': legacy}})
+
+class CandidateBoundaryTests(unittest.TestCase):
+    def fixture(self, root, output):
+        manifest = '[workspace.package]\nversion="0.1.0"\n[workspace.dependencies]\natrinik-protocol = "=0.1.0"\n'
+        (root / 'Cargo.toml').write_text(manifest)
+        (output / 'Cargo.toml').write_text(manifest.replace('"=0.1.0"', '"=0.2.0"'))
+        (output / 'Cargo.lock').write_text('[[package]]\nname="atrinik-protocol"\nversion="0.2.0"\nsource="' + updater.REGISTRY + '"\nchecksum="' + SHA + '"\n')
+        record = {'name': NAME, 'version': VERSION, 'sha256': SHA}
+        candidate = {'repository': 'atrinik/client', 'base': 'a' * 40, 'records': {NAME: record},
+                     'title': 'chore(deps): update atrinik-protocol to 0.2.0',
+                     'files': {'Cargo.toml': SHA, 'Cargo.lock': SHA}}
+        return record, candidate, {'dependencies': [DEP]}
+
+    def test_forged_manifest_exceeds_authenticated_pin_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            with (output / 'Cargo.toml').open('a') as file:
+                file.write('malicious = "1"\n')
+            with patch.object(updater, 'source', return_value=record), self.assertRaisesRegex(ValueError, 'exceed exact dependency pins'):
+                updater.verify_candidate(root, output, policy, candidate)
+
+    def test_forged_git_lock_source_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            path = output / 'Cargo.lock'
+            path.write_text(path.read_text().replace(updater.REGISTRY, 'git+https://attacker.example/repo'))
+            with patch.object(updater, 'source', return_value=record), self.assertRaisesRegex(ValueError, 'non-registry source'):
+                updater.verify_candidate(root, output, policy, candidate)
+
+    def test_extra_candidate_dependency_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            candidate['records']['malicious'] = record
+            with self.assertRaisesRegex(ValueError, 'dependency scope changed'):
+                updater.verify_candidate(root, output, policy, candidate)
+
+    def test_valid_pin_and_registry_lock_reverified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            with patch.object(updater, 'source', return_value=record), patch.object(updater, 'registry') as registry:
+                updater.verify_candidate(root, output, policy, candidate)
+                registry.assert_called_once_with({'name': NAME}, VERSION, SHA)
