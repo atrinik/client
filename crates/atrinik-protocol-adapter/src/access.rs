@@ -78,6 +78,7 @@ impl Drop for AccessAuthentication {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AccessAdapterError {
     InvalidClientHello,
+    InvalidServerHello,
     UnsupportedVersion,
     MissingCapability,
     InvalidPolicy,
@@ -91,6 +92,7 @@ impl Display for AccessAdapterError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidClientHello => "client access offer is invalid",
+            Self::InvalidServerHello => "server access offer is invalid",
             Self::UnsupportedVersion => "server does not support GP1 access negotiation",
             Self::MissingCapability => "server omitted the access-token capability",
             Self::InvalidPolicy => "server access policy is invalid",
@@ -173,6 +175,8 @@ pub fn negotiate_server_access(
         Ok(AccessPolicy::Protected) => Event::AccessRequired,
         Ok(AccessPolicy::Unspecified) | Err(_) => return Err(AccessAdapterError::InvalidPolicy),
     };
+    validation::access_server_hello(hello)
+        .map_err(|_| AccessAdapterError::InvalidServerHello)?;
     Ok(AccessNegotiation { session_id, event })
 }
 
@@ -292,6 +296,19 @@ mod tests {
             negotiate_server_access(&hello(AccessPolicy::Open), &[8; 32]),
             Err(AccessAdapterError::InvalidIdentity)
         );
+    }
+
+    #[test]
+    fn duplicate_access_capabilities_cannot_produce_negotiation_events() {
+        for policy in [AccessPolicy::Open, AccessPolicy::Protected] {
+            let mut invalid = hello(policy);
+            invalid.capabilities = vec![Capability::AccessTokensV1 as i32; 2];
+            assert!(validation::access_server_hello(&invalid).is_err());
+            assert_eq!(
+                negotiate_server_access(&invalid, &[9; 32]),
+                Err(AccessAdapterError::InvalidServerHello)
+            );
+        }
     }
 
     #[test]
