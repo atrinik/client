@@ -14,6 +14,9 @@ jobs:
     name: Verify releases and validate candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
     outputs:
       changed: ${{ steps.candidate.outputs.changed }}
     steps:
@@ -31,6 +34,15 @@ jobs:
         run: |
           python3 tools/released_dependencies.py ready --root .
           python3 -m unittest discover -s tools -p 'test_released_dependencies.py'
+      - name: Pull pinned build image with host-only registry credentials
+        env:
+          REGISTRY_READ_TOKEN: ${{ github.token }}
+          BUILD_IMAGE: ghcr.io/atrinik/linux-build:1.10.0@sha256:7904a1802054662b0ede5b55de72e4c92b0112a3c211125f994ed6c62e9ec9d8
+        run: |
+          export DOCKER_CONFIG="$(mktemp -d "${RUNNER_TEMP}/dependency-registry-auth.XXXXXX")"
+          trap 'rm -rf -- "${DOCKER_CONFIG}"' EXIT
+          printf '%s' "${REGISTRY_READ_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          docker pull "${BUILD_IMAGE}"
       - name: Prepare and validate without App credentials
         id: candidate
         env:
@@ -42,7 +54,6 @@ jobs:
             "${RUNNER_TEMP}/dependency-cache/application"
           install -d "${RUNNER_TEMP}/dependency-artifacts"
           sha256sum "${RUNNER_TEMP}/release-metadata.json" >"${RUNNER_TEMP}/release-metadata-seal.sha256"
-          docker pull "${BUILD_IMAGE}"
           docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
             --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
