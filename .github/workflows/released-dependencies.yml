@@ -30,7 +30,10 @@ jobs:
         env:
           BUILD_IMAGE: ghcr.io/atrinik/linux-build:1.10.0@sha256:7904a1802054662b0ede5b55de72e4c92b0112a3c211125f994ed6c62e9ec9d8
         run: |
-          install -d "${RUNNER_TEMP}/dependency-cache"
+          install -d "${RUNNER_TEMP}/dependency-cache/prepare" \
+            "${RUNNER_TEMP}/dependency-cache/verify" \
+            "${RUNNER_TEMP}/dependency-cache/consumer" \
+            "${RUNNER_TEMP}/dependency-cache/application"
           install -d "${RUNNER_TEMP}/dependency-artifacts"
           docker pull "${BUILD_IMAGE}"
           docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
@@ -38,7 +41,7 @@ jobs:
             --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
             --mount "type=bind,source=${GITHUB_WORKSPACE},target=/repo" \
             --mount "type=bind,source=${RUNNER_TEMP}/dependency-artifacts,target=/artifacts" \
-            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache,target=/cache" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/prepare,target=/cache" \
             --workdir /repo --env HOME=/tmp/dependency-home \
             --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
             --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
@@ -58,9 +61,9 @@ jobs:
               --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
               --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
               --mount "type=bind,source=${candidate},target=/candidate,readonly" \
-              --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache,target=/cache" \
+              --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/verify,target=/cache" \
               --workdir /repo --env HOME=/tmp/dependency-home \
-              --env CARGO_HOME=/cache/verify-cargo --env CARGO_TARGET_DIR=/cache/verify-target \
+              --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
               --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
                 mkdir -p "$HOME"
                 python3 tools/released_dependencies.py verify-lock --root . --candidate /candidate
@@ -74,12 +77,22 @@ jobs:
             --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
             --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
-            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache,target=/cache" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/consumer,target=/cache" \
             --workdir /repo --env HOME=/tmp/dependency-home \
             --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
             --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
               mkdir -p "$HOME"
               python3 tools/released_dependencies.py consumer --root .
+            '
+          docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache/application,target=/cache" \
+            --workdir /repo --env HOME=/tmp/dependency-home \
+            --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
+            --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
+              mkdir -p "$HOME"
               tools/validate-dependency-candidate.sh
             '
           if test -f "${candidate}/candidate.json"; then

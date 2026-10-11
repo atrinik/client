@@ -113,7 +113,8 @@ code. A second credential-free worker independently regenerates and compares the
 lockfile from the trusted manifest. Candidate files are sealed before a separate
 credential-free pinned CPU
 worker tests a read-only source snapshot; that worker cannot modify the sealed
-PR artifact. A separate job uses the selected-repository
+PR artifact. External consumer checks and application validation also use
+separate containers and physical Cargo caches. A separate job uses the selected-repository
 `atrinik-crate-dependency-update` GitHub App to open or update its owned dependency
 PR. It never merges PRs or rewrites a contributor's branch, and waits when a
 human PR already requests the same registry versions.
