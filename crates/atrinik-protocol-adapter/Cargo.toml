@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "atrinik-protocol-adapter"
 version.workspace = true
 edition.workspace = true
