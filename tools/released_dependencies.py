@@ -20,6 +20,9 @@ import urllib.request
 REGISTRY = 'registry+https://github.com/rust-lang/crates.io-index'
 MAX_BYTES = 32 * 1024 * 1024
 MAX_PACKAGES = 2000
+MAX_METADATA_BYTES = 16 * 1024 * 1024
+_DOCUMENTS = {}
+_OFFLINE_DOCUMENTS = False
 
 
 def require(condition, message):
@@ -28,11 +31,16 @@ def require(condition, message):
 
 
 def run(*args, cwd=None):
+    if args and args[0] == 'cargo':
+        require(not any(os.environ.get(key) for key in ('GH_TOKEN', 'GITHUB_TOKEN', 'GITHUB_READ_TOKEN',
+                    'CARGO_REGISTRY_TOKEN', 'CARGO_REGISTRIES_CRATES_IO_TOKEN')),
+                'Cargo execution must be credential-free')
     return subprocess.check_output(args, cwd=cwd, text=True, timeout=600).strip()
 
 
 class Redirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, url):
+        require(not request.has_header('Authorization'), 'authenticated metadata redirect prohibited')
         require(urllib.parse.urlparse(url).scheme == 'https' and
                 urllib.parse.urlparse(url).hostname in {
                     'github.com', 'release-assets.githubusercontent.com',
@@ -42,9 +50,15 @@ class Redirect(urllib.request.HTTPRedirectHandler):
 
 
 def fetch(url, absent=False):
+    headers = {'User-Agent': 'atrinik-dependency-readiness'}
+    token = os.environ.get('GITHUB_READ_TOKEN')
+    if token and urllib.parse.urlparse(url).hostname == 'api.github.com':
+        require(re.fullmatch(r'https://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/releases\?per_page=30|/git/ref/tags/v[0-9]+\.[0-9]+\.[0-9]+|/git/tags/[0-9a-f]{40})?', url),
+                'unexpected authenticated metadata URL')
+        headers['Authorization'] = 'Bearer ' + token
     try:
         with urllib.request.build_opener(Redirect).open(
-                urllib.request.Request(url, headers={'User-Agent': 'atrinik-dependency-readiness'}),
+                urllib.request.Request(url, headers=headers),
                 timeout=30) as response:
             data = response.read(MAX_BYTES + 1)
             require(len(data) <= MAX_BYTES, 'download exceeds bound')
@@ -56,7 +70,31 @@ def fetch(url, absent=False):
 
 
 def document(url):
-    return json.loads(fetch(url))
+    if url not in _DOCUMENTS:
+        require(not _OFFLINE_DOCUMENTS, 'trusted metadata cache miss; rerun host metadata verification')
+        require(len(_DOCUMENTS) < 256, 'metadata request budget exceeded')
+        data = fetch(url)
+        require(len(data) <= 2 * 1024 * 1024, 'metadata document exceeds bound')
+        _DOCUMENTS[url] = json.loads(data)
+    return _DOCUMENTS[url]
+
+
+def load_metadata(path, root, policy):
+    global _OFFLINE_DOCUMENTS
+    value = json.loads(bounded_file(path, MAX_METADATA_BYTES))
+    require(set(value) == {'schema_version', 'repository', 'base', 'documents'} and
+            value['schema_version'] == 1 and value['repository'] == policy['repository'] and
+            isinstance(value['documents'], dict) and len(value['documents']) <= 256,
+            'invalid trusted metadata cache')
+    head = run('git', 'rev-parse', 'HEAD', cwd=root)
+    require(head == value['base'] or
+            run('git', 'rev-parse', 'HEAD^', cwd=root) == value['base'],
+            'metadata cache belongs to a different source base')
+    prefixes = {f'https://api.github.com/repos/{dep["repository"]}' for dep in policy['dependencies']}
+    require(all(any(url == prefix or url.startswith(prefix + '/') for prefix in prefixes)
+                for url in value['documents']), 'metadata cache contains unexpected repository')
+    _DOCUMENTS.update(value['documents'])
+    _OFFLINE_DOCUMENTS = True
 
 
 def exact_dependencies(root, policy):
@@ -210,18 +248,62 @@ def gh_api(endpoint, method='GET', body=None):
     return json.loads(process.stdout)
 
 
-def choose_pr(pulls, version_title, branch, bot, repo):
+def choose_pr(pulls, branch, bot, repo):
     require(len(pulls) < 100, 'PR inventory truncated; refusing mutation')
-    same = [pr for pr in pulls if pr['title'] == version_title]
-    if same:
-        return 'waiting', same[0]
-    owned = [pr for pr in pulls if pr['head']['ref'] == branch]
+    owned = [pr for pr in pulls if pr['head']['ref'] == branch and
+             (pr['head'].get('repo') or {}).get('full_name') == repo]
+    require(len(owned) <= 1, 'multiple PRs use updater branch; refusing mutation')
     if owned:
         pr = owned[0]
-        require(pr['user']['login'] == bot and pr['head']['repo']['full_name'] == repo and
-                pr['base']['ref'] == 'main', 'updater branch belongs to another contributor')
+        require(pr['user']['login'] == bot and pr['base']['ref'] == 'main',
+                'updater branch belongs to another contributor')
         return 'owned', pr
     return 'create', None
+
+
+def branch_head(repo, branch):
+    refs = gh_api(f'repos/{repo}/git/matching-refs/heads/{branch}')
+    require(isinstance(refs, list) and len(refs) < 100, 'branch inventory truncated')
+    exact = [ref for ref in refs if ref['ref'] == 'refs/heads/' + branch]
+    require(len(exact) <= 1, 'duplicate branch identity')
+    if not exact:
+        return None
+    require(exact[0]['object']['type'] == 'commit' and
+            re.fullmatch('[0-9a-f]{40}', exact[0]['object']['sha']), 'invalid branch head')
+    return exact[0]['object']['sha']
+
+
+def updated_manifest(text, policy, records):
+    """Derive only policy pin/source changes, preserving declaration options."""
+    manifest = tomllib.loads(text)
+    expected = tomllib.loads(text)
+    for dep in policy['dependencies']:
+        name = dep['name']
+        version = records[name]['version']
+        require(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version), 'invalid candidate version')
+        value = manifest['workspace']['dependencies'][name]
+        if isinstance(value, dict):
+            legacy = value == dep.get('legacy_git')
+            require(legacy or set(value) <= {'version', 'features', 'default-features'},
+                    'Git/path/registry override prohibited')
+            value = {key: item for key, item in value.items()
+                     if key in {'version', 'features', 'default-features'}}
+            value['version'] = '=' + version
+            if legacy and set(value) == {'version'}:
+                value = value['version']
+        else:
+            value = '=' + version
+        expected['workspace']['dependencies'][name] = value
+        if isinstance(value, dict):
+            declaration = '{ ' + ', '.join(f'{key} = {json.dumps(item, ensure_ascii=False)}'
+                                           for key, item in value.items()) + ' }'
+        else:
+            declaration = json.dumps(value)
+        text, count = re.subn(r'(?m)^' + re.escape(name) + r' = [^\n]+$',
+                             lambda match: f'{name} = {declaration}', text)
+        require(count == 1, 'unsupported trusted manifest declaration')
+    require(tomllib.loads(text) == expected, 'manifest transformation changed other settings')
+    return text
 
 
 def bounded_file(path, maximum=MAX_BYTES):
@@ -261,8 +343,8 @@ def verify_owned_head(repo, pr, main, bot):
     """A PR author alone never authorizes replacing its current branch tree."""
     head = pr['head']['sha']
     commit = gh_api(f'repos/{repo}/commits/{head}')
-    require(commit.get('committer', {}).get('login') == bot and
-            commit.get('author', {}).get('login') == bot and
+    require((commit.get('committer') or {}).get('login') == 'web-flow' and
+            (commit.get('author') or {}).get('login') == bot and
             commit['commit']['verification']['verified'] is True and
             commit['commit']['verification']['reason'] == 'valid',
             'bot branch contains an unverified or foreign commit; preserving branch')
@@ -298,10 +380,8 @@ def verify_candidate(root, output, policy, candidate):
         require(record == authenticated, 'candidate source provenance changed')
         require(tuple(map(int, record['version'].split('.'))) >= tuple(map(int, pins[dep['name']].split('.'))), 'candidate downgrade prohibited')
         name = dep['name']
-        text, count = re.subn(r'(?m)^' + re.escape(name) + r' = [^\n]+$',
-                             f'{name} = "={record["version"]}"', text)
-        require(count == 1, 'unsupported trusted manifest declaration')
         records[name] = authenticated
+    text = updated_manifest(text, policy, records)
     require(bounded_file(output / 'Cargo.toml', 131072).decode() == text, 'candidate changes exceed exact dependency pins')
     expected_title = 'chore(deps): update ' + ', '.join(f'{name} to {record["version"]}' for name, record in records.items())
     require(candidate['title'] == expected_title and set(candidate['files']) == {'Cargo.toml', 'Cargo.lock'}, 'candidate metadata scope changed')
@@ -339,7 +419,10 @@ def publish(root, output, policy):
     pulls = gh_api(f'repos/{repo}/pulls?state=open&per_page=100')
     require(len(pulls) < 100, 'PR inventory truncated; refusing mutation')
     for existing in pulls:
-        head_repo = existing['head']['repo']['full_name']
+        head_repository = existing['head'].get('repo')
+        if head_repository is None or existing['base']['ref'] != 'main':
+            continue
+        head_repo = head_repository['full_name']
         content = gh_api(f'repos/{head_repo}/contents/Cargo.toml?ref={existing["head"]["sha"]}')
         require(content['encoding'] == 'base64' and content['size'] <= 131072, 'PR manifest exceeds bound')
         manifest = tomllib.loads(base64.b64decode(content['content']).decode())
@@ -350,15 +433,18 @@ def publish(root, output, policy):
                for name, record in candidate['records'].items()):
             print('Existing PR waits for these registry versions; preserving contributor branch and text.')
             return
-    mode, pr = choose_pr(pulls, candidate['title'], branch, bot, repo)
-    if mode == 'waiting':
-        print('Existing PR waits for this version; preserving contributor branch and text.')
-        return
+    mode, pr = choose_pr(pulls, branch, bot, repo)
+    previous_head = pr['head']['sha'] if pr else branch_head(repo, branch)
     if mode == 'owned':
         verify_owned_head(repo, pr, main, bot)
+    elif previous_head is not None:
+        verify_owned_head(repo, {'head': {'sha': previous_head}}, main, bot)
+        mode = 'reuse'
     # Credentials never execute build scripts or candidate code. Commit only validated data files.
+    payloads = {}
     for name in ('Cargo.toml', 'Cargo.lock'):
-        data = (output / name).read_bytes()
+        data = bounded_file(output / name)
+        payloads[name] = data
         require(hashlib.sha256(data).hexdigest() == candidate['files'][name], 'candidate artifact drift')
         (root / name).write_bytes(data)
     require(run('git', 'diff', '--name-only', cwd=root).splitlines() == ['Cargo.lock', 'Cargo.toml'], 'unexpected candidate diff')
@@ -367,23 +453,29 @@ def publish(root, output, policy):
     entries = []
     for name in ('Cargo.toml', 'Cargo.lock'):
         blob = gh_api(f'repos/{repo}/git/blobs', 'POST', {
-            'content': base64.b64encode((output / name).read_bytes()).decode(), 'encoding': 'base64'})
+            'content': base64.b64encode(payloads[name]).decode(), 'encoding': 'base64'})
         entries.append({'path': name, 'mode': '100644', 'type': 'blob', 'sha': blob['sha']})
     tree = gh_api(f'repos/{repo}/git/trees', 'POST', {'base_tree': commit['tree']['sha'], 'tree': entries})
-    parents = [main] if mode == 'create' else [main, pr['head']['sha']]
+    parents = [main] if previous_head is None else list(dict.fromkeys([main, previous_head]))
     update = gh_api(f'repos/{repo}/git/commits', 'POST', {'message': candidate['title'], 'tree': tree['sha'], 'parents': parents})
     require(gh_api(f'repos/{repo}/git/ref/heads/main')['object']['sha'] == main, 'main advanced before branch mutation')
     if mode == 'create':
         gh_api(f'repos/{repo}/git/refs', 'POST', {'ref': 'refs/heads/' + branch, 'sha': update['sha']})
-    else:
+    elif mode == 'owned':
         fresh = gh_api(f'repos/{repo}/pulls/{pr["number"]}')
         require(fresh['user']['login'] == bot and fresh['head']['sha'] == pr['head']['sha'] and
-                fresh['head']['ref'] == branch and fresh['head']['repo']['full_name'] == repo,
+                fresh['head']['ref'] == branch and (fresh['head'].get('repo') or {}).get('full_name') == repo,
                 'owned bot PR changed before mutation')
         require(gh_api(f'repos/{repo}/git/ref/heads/{branch}')['object']['sha'] == pr['head']['sha'], 'bot branch advanced')
         # Previous bot commit is a parent, so a concurrent replacement cannot fast-forward.
         gh_api(f'repos/{repo}/git/refs/heads/{branch}', 'PATCH', {'sha': update['sha'], 'force': False})
-    if mode == 'create':
+    else:
+        fresh_pulls = gh_api(f'repos/{repo}/pulls?state=open&per_page=100')
+        fresh_mode, _ = choose_pr(fresh_pulls, branch, bot, repo)
+        require(fresh_mode == 'create', 'stale branch acquired an open PR; rerun publisher')
+        require(branch_head(repo, branch) == previous_head, 'bot branch advanced')
+        gh_api(f'repos/{repo}/git/refs/heads/{branch}', 'PATCH', {'sha': update['sha'], 'force': False})
+    if mode in {'create', 'reuse'}:
         gh_api(f'repos/{repo}/pulls', 'POST', {'title': candidate['title'], 'head': branch,
                'base': 'main', 'body': 'Updates exact released registry dependencies and Cargo.lock.\n\nSource release provenance, crates.io API/index/archive checksums, and credential-free Cargo resolution passed. Required application CI and review must pass before merge. No automatic merge.'})
     # Preserve the existing PR title/body as contributor text.
@@ -421,18 +513,39 @@ def consumer(records):
 
 
 def main():
+    global _OFFLINE_DOCUMENTS
+    _DOCUMENTS.clear()
+    _OFFLINE_DOCUMENTS = False
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['ready', 'prepare', 'consumer', 'verify-lock', 'publish'])
+    parser.add_argument('command', choices=['ready', 'metadata', 'prepare', 'consumer', 'verify-lock', 'publish'])
     parser.add_argument('--root', type=Path, default=Path('.'))
     parser.add_argument('--output', '--candidate', type=Path)
+    parser.add_argument('--metadata-cache', type=Path, default=os.environ.get('CRATE_RELEASE_METADATA_CACHE'))
     args = parser.parse_args()
     root = args.root.resolve()
     policy = json.loads((root / 'policy/released-dependencies.json').read_text())
     require(policy['schema_version'] == 1, 'unsupported dependency policy')
+    if args.metadata_cache is not None:
+        require(args.command not in {'metadata', 'publish'}, 'publication requires fresh host metadata verification')
+        load_metadata(args.metadata_cache, root, policy)
     if args.command == 'publish':
         publish(root, args.output, policy)
         return
     require(not any(os.environ.get(key) for key in ('GH_TOKEN', 'GITHUB_TOKEN', 'CARGO_REGISTRY_TOKEN', 'CARGO_REGISTRIES_CRATES_IO_TOKEN')), 'verification/build job must be credential-free')
+    if args.command in {'prepare', 'consumer', 'verify-lock'}:
+        require(not os.environ.get('GITHUB_READ_TOKEN'), 'Cargo process must not inherit metadata credentials')
+    if args.command == 'metadata':
+        require(args.output is not None, 'metadata requires --output')
+        exact_dependencies(root, policy)
+        for dep in policy['dependencies']:
+            source(dep)
+        value = {'schema_version': 1, 'repository': policy['repository'],
+                 'base': run('git', 'rev-parse', 'HEAD', cwd=root), 'documents': _DOCUMENTS}
+        data = json.dumps(value, sort_keys=True) + '\n'
+        require(len(data.encode()) <= MAX_METADATA_BYTES, 'metadata cache exceeds bound')
+        with args.output.open('x') as output:
+            output.write(data)
+        return
     if args.command == 'verify-lock':
         verify_lock(root, args.output, policy)
         return
@@ -453,16 +566,17 @@ def main():
         return
     require(args.output is not None, 'prepare requires --output')
     declarations = tomllib.loads((root / 'Cargo.toml').read_text())['workspace']['dependencies']
-    if all(declarations[name] == '=' + record['version'] for name, record in records.items()):
+    if all((declarations[name].get('version') == '=' + record['version'] and
+            not any(key in declarations[name] for key in ('git', 'path', 'registry')))
+           if isinstance(declarations[name], dict) else declarations[name] == '=' + record['version']
+           for name, record in records.items()):
         print('No released dependency update.')
         return
     args.output.mkdir(parents=True, exist_ok=False)
     text = (root / 'Cargo.toml').read_text()
     for name, record in records.items():
         require(tuple(map(int, record['version'].split('.'))) >= tuple(map(int, pins[name].split('.'))), 'dependency downgrade prohibited')
-        text, count = re.subn(r'(?m)^' + re.escape(name) + r' = [^\n]+$',
-                             f'{name} = "={record["version"]}"', text)
-        require(count == 1, 'unsupported dependency declaration for update')
+    text = updated_manifest(text, policy, records)
     (root / 'Cargo.toml').write_text(text)
     run('cargo', '+1.97.1', 'generate-lockfile', cwd=root)
     lock_check(root, records)

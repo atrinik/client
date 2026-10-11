@@ -64,19 +64,19 @@ class OwnershipTests(unittest.TestCase):
         return {'title': title, 'user': {'login': bot}, 'head': {'ref': branch, 'sha': 'a' * 40,
                 'repo': {'full_name': 'atrinik/client'}}, 'base': {'ref': 'main'}}
 
-    def test_existing_human_same_version_untouched(self):
+    def test_matching_title_does_not_suppress_update(self):
         pr = self.pr(title='new', bot='human', branch='feat/access-tokens')
-        self.assertEqual(updater.choose_pr([pr], 'new', 'automation/released-crate-dependencies',
-                                          'atrinik-crate-dependency-update[bot]', 'atrinik/client'), ('waiting', pr))
+        self.assertEqual(updater.choose_pr([pr], 'automation/released-crate-dependencies',
+                                          'atrinik-crate-dependency-update[bot]', 'atrinik/client'), ('create', None))
 
     def test_human_automation_branch_rejected(self):
         with self.assertRaisesRegex(ValueError, 'another contributor'):
-            updater.choose_pr([self.pr(bot='human')], 'new', 'automation/released-crate-dependencies',
+            updater.choose_pr([self.pr(bot='human')], 'automation/released-crate-dependencies',
                               'atrinik-crate-dependency-update[bot]', 'atrinik/client')
 
     def test_owned_bot_branch_identified(self):
         pr = self.pr()
-        self.assertEqual(updater.choose_pr([pr], 'new', 'automation/released-crate-dependencies',
+        self.assertEqual(updater.choose_pr([pr], 'automation/released-crate-dependencies',
                                           'atrinik-crate-dependency-update[bot]', 'atrinik/client'), ('owned', pr))
 
     def test_concurrent_main_drift_stops_before_write(self):
@@ -91,7 +91,7 @@ class OwnershipTests(unittest.TestCase):
 
     def test_inventory_truncation_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'truncated'):
-            updater.choose_pr([self.pr()] * 100, 'new', 'automation/released-crate-dependencies',
+            updater.choose_pr([self.pr()] * 100, 'automation/released-crate-dependencies',
                               'atrinik-crate-dependency-update[bot]', 'atrinik/client')
 
 
@@ -380,7 +380,7 @@ class HardenedBoundaryTests(unittest.TestCase):
 
 class BotHeadTests(unittest.TestCase):
     def fixture(self, login='atrinik-crate-dependency-update[bot]', verified=True, changed='Cargo.toml'):
-        commit = {'author': {'login': login}, 'committer': {'login': login}, 'commit': {'message': 'chore(deps): update atrinik-protocol to 0.2.0', 'verification': {'verified': verified, 'reason': 'valid'}}, 'parents': [{'sha': 'b' * 40}]}
+        commit = {'author': {'login': login}, 'committer': {'login': 'web-flow'}, 'commit': {'message': 'chore(deps): update atrinik-protocol to 0.2.0', 'verification': {'verified': verified, 'reason': 'valid'}}, 'parents': [{'sha': 'b' * 40}]}
         old = {'truncated': False, 'tree': [{'path': changed, 'mode': '100644', 'type': 'blob', 'sha': 'a' * 40}]}
         new = {'truncated': False, 'tree': [{'path': changed, 'mode': '100644', 'type': 'blob', 'sha': 'b' * 40}]}
         return patch.object(updater, 'gh_api', side_effect=[commit, {'status': 'ahead'}, old, new])
@@ -426,6 +426,8 @@ class PublisherRaceTests(unittest.TestCase):
                     return {'object': {'sha': candidate['base'] if count == 1 or owned else 'b' * 40}}
                 if '/pulls?' in endpoint:
                     return [pr] if owned else []
+                if '/git/matching-refs/' in endpoint:
+                    return []
                 if '/contents/' in endpoint:
                     data = b'[workspace.dependencies]\natrinik-protocol="=0.1.0"\n'
                     return {'encoding': 'base64', 'size': len(data), 'content': updater.base64.b64encode(data).decode()}
@@ -455,6 +457,246 @@ class PublisherRaceTests(unittest.TestCase):
 
     def test_human_pushes_to_owned_pr_before_ref_write(self):
         self.exercise(owned=True)
+
+
+class ManifestOptionTests(unittest.TestCase):
+    def test_table_options_preserved(self):
+        text = '[workspace.dependencies]\natrinik-protocol = { version = "=0.1.0", default-features = false, features = ["wire", "serde"] }\n'
+        result = updater.updated_manifest(text, {'dependencies': [DEP]}, {NAME: {'version': VERSION}})
+        before, after = updater.tomllib.loads(text), updater.tomllib.loads(result)
+        before['workspace']['dependencies'][NAME]['version'] = '=' + VERSION
+        self.assertEqual(before, after)
+        self.assertFalse(after['workspace']['dependencies'][NAME]['default-features'])
+
+    def test_candidate_feature_removal_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = CandidateBoundaryTests().fixture(root, output)
+            path = root / 'Cargo.toml'
+            path.write_text(path.read_text().replace('atrinik-protocol = "=0.1.0"', 'atrinik-protocol = {version="=0.1.0", features=["wire"], default-features=false}'))
+            with patch.object(updater, 'source', return_value=record), self.assertRaisesRegex(ValueError, 'exceed exact dependency pins'):
+                updater.verify_candidate(root, output, policy, candidate)
+            (output / 'Cargo.toml').write_text(updater.updated_manifest(path.read_text(), policy, {NAME: record}))
+            candidate['files']['Cargo.toml'] = hashlib.sha256((output / 'Cargo.toml').read_bytes()).hexdigest()
+            with patch.object(updater, 'source', return_value=record), patch.object(updater, 'registry'):
+                updater.verify_candidate(root, output, policy, candidate)
+
+    def test_unchanged_table_is_noop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'policy').mkdir()
+            (root / 'policy/released-dependencies.json').write_text(json.dumps({'schema_version': 1, 'dependencies': [DEP]}))
+            manifest = '[workspace.dependencies]\natrinik-protocol = {version="=0.2.0", features=["wire"], default-features=false}\n'
+            (root / 'Cargo.toml').write_text(manifest)
+            with patch('sys.argv', ['updater', 'prepare', '--root', str(root), '--output', str(root / 'candidate')]), patch.dict(updater.os.environ, {}, clear=True), patch.object(updater, 'source', return_value={'name': NAME, 'version': VERSION, 'sha256': SHA}), patch.object(updater, 'run') as run:
+                updater.main()
+            run.assert_not_called()
+            self.assertFalse((root / 'candidate').exists())
+            self.assertEqual((root / 'Cargo.toml').read_text(), manifest)
+
+
+class PublisherReviewRegressionTests(unittest.TestCase):
+    def exercise(self, *, retained=False, foreign=False, drift=False, new_pr=False,
+                 deleted_fork=False, same_title=False, other_base=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = CandidateBoundaryTests().fixture(root, output)
+            policy.update(repository='atrinik/client', repository_id=1)
+            (output / 'candidate.json').write_text(json.dumps(candidate))
+            pr = OwnershipTests().pr(title=candidate['title'], branch='feature/contributor', bot='human')
+            if deleted_fork:
+                pr['head']['repo'] = None
+            if other_base:
+                pr['base']['ref'] = 'maintenance'
+            calls = []
+            def api(endpoint, method='GET', body=None):
+                calls.append((endpoint, method, body))
+                if endpoint.startswith('installation/'):
+                    return {'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1}]}
+                if endpoint.endswith('/git/ref/heads/main'):
+                    return {'object': {'sha': candidate['base']}}
+                if '/pulls?' in endpoint:
+                    if new_pr and sum('/pulls?' in call[0] for call in calls) > 1:
+                        return [OwnershipTests().pr()]
+                    return [pr] if deleted_fork or same_title or other_base else []
+                if '/git/matching-refs/' in endpoint:
+                    if not retained:
+                        return []
+                    count = sum('/git/matching-refs/' in call[0] for call in calls)
+                    return [{'ref': 'refs/heads/automation/released-crate-dependencies', 'object': {'type': 'commit', 'sha': ('e' if drift and count > 1 else 'b') * 40}}]
+                if '/contents/' in endpoint:
+                    self.assertFalse(deleted_fork or other_base, 'unavailable or wrong-base PR should not be fetched')
+                    data = b'[workspace.dependencies]\natrinik-protocol="=0.1.0"\n'
+                    return {'encoding': 'base64', 'size': len(data), 'content': updater.base64.b64encode(data).decode()}
+                if method in {'POST', 'PATCH'}:
+                    return {'sha': 'c' * 40}
+                if '/git/commits/' in endpoint:
+                    return {'tree': {'sha': 'd' * 40}}
+                self.fail(f'unexpected API operation: {endpoint} {method}')
+            def run(*args, **kwargs):
+                if args[:2] == ('git', 'rev-parse'):
+                    return candidate['base']
+                if args[:2] == ('git', 'status'):
+                    return ''
+                if args[:2] == ('git', 'diff'):
+                    return 'Cargo.lock\nCargo.toml'
+                self.fail(f'unexpected command: {args}')
+            error = 'foreign commit' if foreign else 'bot branch advanced' if drift else 'acquired an open PR' if new_pr else None
+            with patch.dict(updater.os.environ, {'CRATE_DEPENDENCY_UPDATE_APP_SLUG': 'atrinik-crate-dependency-update'}), patch.object(updater, 'verify_candidate'), patch.object(updater, 'verify_owned_head', side_effect=ValueError('foreign commit') if foreign else None) as ownership, patch.object(updater, 'run', side_effect=run), patch.object(updater, 'gh_api', side_effect=api):
+                if error:
+                    with self.assertRaisesRegex(ValueError, error):
+                        updater.publish(root, output, policy)
+                else:
+                    updater.publish(root, output, policy)
+            mutations = [call for call in calls if '/git/refs' in call[0] and call[1] != 'GET']
+            if error:
+                self.assertEqual(mutations, [])
+            else:
+                self.assertEqual(len(mutations), 1)
+                self.assertEqual(mutations[0][1], 'PATCH' if retained else 'POST')
+                if retained:
+                    self.assertFalse(mutations[0][2]['force'])
+                    ownership.assert_called_once_with('atrinik/client', {'head': {'sha': 'b' * 40}}, candidate['base'], 'atrinik-crate-dependency-update[bot]')
+                    commits = [call for call in calls if call[0].endswith('/git/commits')]
+                    self.assertEqual(commits[0][2]['parents'], [candidate['base'], 'b' * 40])
+                self.assertEqual(sum(endpoint.endswith('/pulls') and method == 'POST' for endpoint, method, body in calls), 1)
+            self.assertFalse(any(method == 'DELETE' for endpoint, method, body in calls))
+
+    def test_retained_closed_or_merged_bot_ref_reused(self):
+        self.exercise(retained=True)
+
+    def test_foreign_retained_ref_preserved(self):
+        self.exercise(retained=True, foreign=True)
+
+    def test_retained_ref_advance_preserved(self):
+        self.exercise(retained=True, drift=True)
+
+    def test_new_pr_on_retained_ref_stops_mutation(self):
+        self.exercise(retained=True, new_pr=True)
+
+    def test_deleted_fork_skipped(self):
+        self.exercise(deleted_fork=True)
+
+    def test_matching_title_with_wrong_pins_does_not_suppress(self):
+        self.exercise(same_title=True)
+
+    def test_non_main_pr_does_not_suppress(self):
+        self.exercise(other_base=True)
+
+
+class MetadataIsolationTests(unittest.TestCase):
+    def setUp(self):
+        updater._DOCUMENTS.clear()
+        updater._OFFLINE_DOCUMENTS = False
+
+    def tearDown(self):
+        updater._DOCUMENTS.clear()
+        updater._OFFLINE_DOCUMENTS = False
+
+    def test_document_gets_deduplicated(self):
+        with patch.object(updater, 'fetch', return_value=b'{"id":1}') as fetch:
+            for _ in range(6):
+                self.assertEqual(updater.document('https://api.github.com/repos/atrinik/protocol'), {'id': 1})
+            self.assertEqual(fetch.call_count, 1)
+
+    def test_cached_documents_never_fallback_to_network(self):
+        updater._OFFLINE_DOCUMENTS = True
+        with patch.object(updater, 'fetch') as fetch, self.assertRaisesRegex(ValueError, 'cache miss'):
+            updater.document('https://api.github.com/repos/atrinik/protocol')
+        fetch.assert_not_called()
+
+    def test_auth_token_only_on_bounded_github_metadata_requests(self):
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{}'
+        opener = MagicMock()
+        opener.open.return_value = response
+        with patch.dict(updater.os.environ, {'GITHUB_READ_TOKEN': 'fixture-read-token'}), patch.object(updater.urllib.request, 'build_opener', return_value=opener):
+            updater.fetch('https://api.github.com/repos/atrinik/protocol')
+            request = opener.open.call_args.args[0]
+            self.assertEqual(request.get_header('Authorization'), 'Bearer fixture-read-token')
+            for url in ['https://crates.io/api/v1/crates/log/0.1.0', 'https://github.com/atrinik/protocol/releases/download/v1.0.0/provenance.json']:
+                updater.fetch(url)
+                self.assertIsNone(opener.open.call_args.args[0].get_header('Authorization'))
+            with self.assertRaisesRegex(ValueError, 'metadata URL'):
+                updater.fetch('https://api.github.com/user')
+            with self.assertRaisesRegex(ValueError, 'redirect prohibited'):
+                updater.Redirect().redirect_request(request, None, 302, 'redirect', {}, 'https://github.com/attacker')
+
+    def test_cargo_commands_reject_metadata_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'policy').mkdir()
+            (root / 'policy/released-dependencies.json').write_text('{"schema_version":1}')
+            for command in ('prepare', 'consumer', 'verify-lock'):
+                with patch('sys.argv', ['updater', command, '--root', str(root)]), patch.dict(updater.os.environ, {'GITHUB_READ_TOKEN': 'fixture-token'}, clear=True), patch.object(updater, 'run') as run, self.assertRaisesRegex(ValueError, 'must not inherit metadata credentials'):
+                    updater.main()
+                run.assert_not_called()
+
+    def test_direct_cargo_execution_rejects_read_token(self):
+        with patch.dict(updater.os.environ, {'GITHUB_READ_TOKEN': 'fixture-token'}), patch.object(updater.subprocess, 'check_output') as execute, self.assertRaisesRegex(ValueError, 'credential-free'):
+            updater.run('cargo', '+1.97.1', 'check')
+        execute.assert_not_called()
+
+    def test_metadata_file_requires_correct_base_and_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'metadata.json'
+            value = {'schema_version': 1, 'repository': 'atrinik/client', 'base': 'a' * 40, 'documents': {'https://api.github.com/repos/atrinik/protocol': {'id': 123}}}
+            path.write_text(json.dumps(value))
+            policy = {'repository': 'atrinik/client', 'dependencies': [DEP]}
+            with patch.object(updater, 'run', return_value='a' * 40):
+                updater.load_metadata(path, root, policy)
+            self.assertEqual(updater.document('https://api.github.com/repos/atrinik/protocol'), {'id': 123})
+            with patch.object(updater, 'run', return_value='b' * 40), self.assertRaisesRegex(ValueError, 'different source base'):
+                updater.load_metadata(path, root, policy)
+            value['repository'] = 'attacker/client'
+            path.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, 'invalid trusted metadata'):
+                updater.load_metadata(path, root, policy)
+
+
+class MetadataRequestBudgetTests(unittest.TestCase):
+    setUp = MetadataIsolationTests.setUp
+    tearDown = MetadataIsolationTests.tearDown
+    def test_six_dependencies_use_nine_public_api_gets(self):
+        responses = {}
+        dependencies = []
+        for repo_name, names in [('protocol', ['atrinik-protocol']),
+                                 ('renderer', ['atrinik-renderer', 'atrinik-renderer-core', 'atrinik-renderer-assets']),
+                                 ('toolkit', ['atrinik-toolkit', 'atrinik-toolkit-core'])]:
+            repo = 'atrinik/' + repo_name
+            tag = 'v1.0.0'
+            revision = 'a' * 40
+            records = [{'name': name, 'version': VERSION, 'sha256': SHA, 'asset': f'{name}-{VERSION}.crate'} for name in names]
+            manifest = {'schema_version': 1, 'repository': repo, 'repository_id': 123,
+                        'source_tag': tag, 'revision': revision, 'crates': records}
+            files = {'crate-release.json': json.dumps(manifest).encode(),
+                     'provenance.json': json.dumps({'revision': revision, 'version': '1.0.0'}).encode(),
+                     'SHA256SUMS': ''.join(f'{SHA}  {name}-{VERSION}.crate\n' for name in names).encode()}
+            files.update({record['asset']: DATA for record in records})
+            assets = []
+            for name, data in files.items():
+                url = f'https://github.com/{repo}/releases/download/{tag}/{name}'
+                responses[url] = data
+                assets.append({'name': name, 'state': 'uploaded', 'size': len(data),
+                               'browser_download_url': url, 'digest': 'sha256:' + hashlib.sha256(data).hexdigest()})
+            prefix = 'https://api.github.com/repos/' + repo
+            responses[prefix] = json.dumps({'id': 123, 'full_name': repo}).encode()
+            responses[prefix + '/releases?per_page=30'] = json.dumps([{'tag_name': tag, 'immutable': True,
+                'draft': False, 'prerelease': False, 'published_at': '2026-10-11', 'assets': assets}]).encode()
+            responses[prefix + '/git/ref/tags/' + tag] = json.dumps({'object': {'type': 'commit', 'sha': revision}}).encode()
+            dependencies.extend({'name': name, 'repository': repo, 'repository_id': 123} for name in names)
+        with patch.object(updater, 'fetch', side_effect=lambda url: responses[url]) as fetch, patch.object(updater, 'registry'):
+            for dependency in dependencies:
+                self.assertEqual(updater.source(dependency)['version'], VERSION)
+        public_calls = [call.args[0] for call in fetch.call_args_list if call.args[0].startswith('https://api.github.com/')]
+        self.assertEqual(len(public_calls), 9)
+        self.assertEqual(len(set(public_calls)), 9)
 
 
 if __name__ == '__main__':
