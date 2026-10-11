@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
+    if: github.ref == 'refs/heads/main'
     name: Verify releases and validate candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -43,6 +44,10 @@ jobs:
             --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
               mkdir -p "$HOME"
               python3 tools/released_dependencies.py prepare --root . --output /artifacts/candidate
+              if test -f /artifacts/candidate/candidate.json; then
+                git -c user.name=dependency-candidate -c user.email=dependency-candidate@users.noreply.github.com \
+                  -c core.hooksPath=/dev/null commit -m "chore(deps): validate registry candidate" -- Cargo.toml Cargo.lock
+              fi
               tools/validate-dependency-candidate.sh
             '
           if test -f "${RUNNER_TEMP}/dependency-artifacts/candidate/candidate.json"; then
