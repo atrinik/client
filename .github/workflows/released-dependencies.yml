@@ -44,12 +44,35 @@ jobs:
             --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
               mkdir -p "$HOME"
               python3 tools/released_dependencies.py prepare --root . --output /artifacts/candidate
-              if test -f /artifacts/candidate/candidate.json; then
-                git -c user.name=dependency-candidate -c user.email=dependency-candidate@users.noreply.github.com \
-                  -c core.hooksPath=/dev/null commit -m "chore(deps): validate registry candidate" -- Cargo.toml Cargo.lock
-              fi
+            '
+          candidate="${RUNNER_TEMP}/dependency-artifacts/candidate"
+          if test -f "${candidate}/candidate.json"; then
+            sha256sum "${candidate}/Cargo.toml" "${candidate}/Cargo.lock" "${candidate}/candidate.json" \
+              >"${RUNNER_TEMP}/dependency-candidate-seal.sha256"
+          fi
+          git clone --no-hardlinks --config core.hooksPath=/dev/null \
+            "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}/dependency-validation-source"
+          if test -f "${candidate}/candidate.json"; then
+            cp "${candidate}/Cargo.toml" "${candidate}/Cargo.lock" "${RUNNER_TEMP}/dependency-validation-source/"
+            git -C "${RUNNER_TEMP}/dependency-validation-source" \
+              -c user.name=dependency-candidate -c user.email=dependency-candidate@users.noreply.github.com \
+              commit -m "chore(deps): validate registry candidate" -- Cargo.toml Cargo.lock
+          fi
+          docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
+            --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache,target=/cache" \
+            --workdir /repo --env HOME=/tmp/dependency-home \
+            --env CARGO_HOME=/cache/cargo --env CARGO_TARGET_DIR=/cache/target \
+            --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
+              mkdir -p "$HOME"
+              python3 tools/released_dependencies.py consumer --root .
               tools/validate-dependency-candidate.sh
             '
+          if test -f "${candidate}/candidate.json"; then
+            sha256sum --check --strict "${RUNNER_TEMP}/dependency-candidate-seal.sha256"
+          fi
           if test -f "${RUNNER_TEMP}/dependency-artifacts/candidate/candidate.json"; then
             echo "changed=true" >>"${GITHUB_OUTPUT}"
           else
