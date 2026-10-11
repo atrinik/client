@@ -111,10 +111,12 @@ upstream source-release manifests and crates.io API, index and archive checksums
 then generates the exact registry pin and lockfile without executing dependency
 code. A second credential-free worker independently regenerates and compares the
 lockfile from the trusted manifest. Candidate files are sealed before a separate
-credential-free pinned CPU
-worker tests a read-only source snapshot; that worker cannot modify the sealed
-PR artifact. External consumer checks and application validation also use
-separate containers and physical Cargo caches. A separate job uses the selected-repository
+credential-free pinned CPU worker tests a read-only source snapshot; that worker
+cannot modify the sealed PR artifact. External consumer checks and application validation also use
+separate containers and physical Cargo caches. Public GitHub release metadata
+is collected on the host with a read-only token, sealed, and mounted read-only
+into those containers. Build stages receive the metadata file without
+credentials. A separate job uses the selected-repository
 `atrinik-crate-dependency-update` GitHub App to open or update its owned dependency
 PR. It never merges PRs or rewrites a contributor's branch, and waits when a
 human PR already requests the same registry versions.
@@ -123,6 +125,6 @@ Configure repository variable `CRATE_DEPENDENCY_UPDATE_APP_ID` and secret
 `CRATE_DEPENDENCY_UPDATE_APP_PRIVATE_KEY` only for the publishing job. The App
 needs contents and pull-request write plus metadata read on client and editor.
 The readiness gate reports missing exact registry packages before compilation;
-the reviewed protocol 0.1.0 historical checksum remains supported. Client's ten
-internal crates have `publish = false`; application GitHub releases continue
+the reviewed protocol 0.1.0 and 0.2.0 historical checksums remain supported.
+Client's ten internal crates have `publish = false`; application GitHub releases continue
 through their existing workflows.
