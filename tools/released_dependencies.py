@@ -69,13 +69,45 @@ def fetch(url, absent=False):
         raise
 
 
+def public_identity(value):
+    require(isinstance(value, dict) and value.get('private') is False, 'upstream repository must be public')
+    return {key: value[key] for key in ('id', 'node_id', 'full_name', 'private', 'default_branch')
+            if key in value}
+
+
+def public_document(url, value):
+    repository = r'https://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+    if re.fullmatch(repository, url):
+        return public_identity(value)
+    if re.fullmatch(repository + r'/releases\?per_page=30(?:&page=(?:[2-9]|10))?', url):
+        require(isinstance(value, list), 'invalid release inventory page')
+        releases = []
+        for release in value:
+            require(isinstance(release, dict), 'invalid release metadata')
+            if release.get('draft') is True:
+                # Keep pagination cardinality without forwarding private draft content.
+                releases.append({'draft': True, 'prerelease': False})
+                continue
+            require(release.get('draft') is False and release.get('published_at'),
+                    'unpublished source release metadata')
+            item = {key: release[key] for key in
+                    ('draft', 'prerelease', 'immutable', 'published_at', 'tag_name') if key in release}
+            require(isinstance(release.get('assets'), list), 'invalid release assets')
+            item['assets'] = [{key: asset[key] for key in
+                               ('name', 'state', 'size', 'browser_download_url', 'digest') if key in asset}
+                              for asset in release['assets']]
+            releases.append(item)
+        return releases
+    return value
+
+
 def document(url):
     if url not in _DOCUMENTS:
         require(not _OFFLINE_DOCUMENTS, 'trusted metadata cache miss; rerun host metadata verification')
         require(len(_DOCUMENTS) < 256, 'metadata request budget exceeded')
         data = fetch(url)
         require(len(data) <= 2 * 1024 * 1024, 'metadata document exceeds bound')
-        _DOCUMENTS[url] = json.loads(data)
+        _DOCUMENTS[url] = public_document(url, json.loads(data))
     return _DOCUMENTS[url]
 
 
@@ -93,6 +125,8 @@ def load_metadata(path, root, policy):
     prefixes = {f'https://api.github.com/repos/{dep["repository"]}' for dep in policy['dependencies']}
     require(all(any(url == prefix or url.startswith(prefix + '/') for prefix in prefixes)
                 for url in value['documents']), 'metadata cache contains unexpected repository')
+    for url, data in value['documents'].items():
+        require(data == public_document(url, data), 'cached metadata contains non-public fields')
     _DOCUMENTS.update(value['documents'])
     _OFFLINE_DOCUMENTS = True
 

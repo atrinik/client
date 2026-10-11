@@ -625,9 +625,9 @@ class MetadataIsolationTests(unittest.TestCase):
         updater._OFFLINE_DOCUMENTS = False
 
     def test_document_gets_deduplicated(self):
-        with patch.object(updater, 'fetch', return_value=b'{"id":1}') as fetch:
+        with patch.object(updater, 'fetch', return_value=b'{"id":1,"private":false}') as fetch:
             for _ in range(6):
-                self.assertEqual(updater.document('https://api.github.com/repos/atrinik/protocol'), {'id': 1})
+                self.assertEqual(updater.document('https://api.github.com/repos/atrinik/protocol'), {'id': 1, 'private': False})
             self.assertEqual(fetch.call_count, 1)
 
     def test_cached_documents_never_fallback_to_network(self):
@@ -664,6 +664,65 @@ class MetadataIsolationTests(unittest.TestCase):
                     updater.main()
                 run.assert_not_called()
 
+    def test_metadata_writer_excludes_nonempty_authenticated_identity_fields(self):
+        identity = {'id': 123, 'node_id': 'R_fixture', 'full_name': DEP['repository'],
+                    'private': False, 'default_branch': 'main', 'permissions': {'admin': True},
+                    'temp_clone_token': 'synthetic-private-clone-token', 'role_name': 'admin',
+                    'security_and_analysis': {'internal_only': True}}
+        drafts = [{'draft': True, 'prerelease': False, 'body': 'synthetic-private-draft-body',
+                   'assets': [{'browser_download_url': 'synthetic-private-draft-asset'}]}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy = {'schema_version': 1, 'repository': 'atrinik/client', 'dependencies': [DEP]}
+            (root / 'policy').mkdir()
+            (root / 'policy/released-dependencies.json').write_text(json.dumps(policy))
+            (root / 'Cargo.toml').write_text('[workspace.dependencies]\natrinik-protocol = "=0.2.0"\n')
+            output = root / 'metadata.json'
+            def source(dependency):
+                updater.document('https://api.github.com/repos/' + dependency['repository'])
+                updater.document('https://api.github.com/repos/' + dependency['repository'] + '/releases?per_page=30')
+            def fetch(url):
+                return json.dumps(drafts if '/releases?' in url else identity).encode()
+            with patch('sys.argv', ['updater', 'metadata', '--root', str(root), '--output', str(output)]), patch.dict(updater.os.environ, {}, clear=True), patch.object(updater, 'fetch', side_effect=fetch), patch.object(updater, 'source', side_effect=source), patch.object(updater, 'run', return_value='a' * 40):
+                updater.main()
+            data = output.read_text()
+            self.assertNotIn('synthetic-private-clone-token', data)
+            self.assertNotIn('synthetic-private-draft-body', data)
+            self.assertNotIn('synthetic-private-draft-asset', data)
+            value = json.loads(data)['documents']['https://api.github.com/repos/' + DEP['repository']]
+            self.assertEqual(set(value), {'id', 'node_id', 'full_name', 'private', 'default_branch'})
+            self.assertNotIn('permissions', data)
+            self.assertNotIn('security_and_analysis', data)
+            self.assertNotIn('role_name', data)
+            with patch.object(updater, 'run', return_value='a' * 40):
+                updater.load_metadata(output, root, policy)
+
+    def test_draft_sanitization_preserves_pagination_cardinality(self):
+        drafts = [{'draft': True, 'body': 'private draft content'}] * 30
+        identity = {'id': DEP['repository_id'], 'full_name': DEP['repository'], 'private': False}
+        with patch.object(updater, 'fetch', side_effect=[json.dumps(drafts).encode(), json.dumps(identity).encode(), b'[]']) as fetch:
+            page = updater.document('https://api.github.com/repos/atrinik/protocol/releases?per_page=30')
+            self.assertEqual(page, [{'draft': True, 'prerelease': False}] * 30)
+            with self.assertRaisesRegex(ValueError, 'no reviewed source release'):
+                updater.source(DEP)
+            self.assertTrue(fetch.call_args.args[0].endswith('per_page=30&page=2'))
+
+    def test_private_identity_is_not_cached(self):
+        with patch.object(updater, 'fetch', return_value=b'{"id":123,"private":true}'), self.assertRaisesRegex(ValueError, 'must be public'):
+            updater.document('https://api.github.com/repos/atrinik/protocol')
+        self.assertEqual(updater._DOCUMENTS, {})
+
+    def test_cache_loader_rejects_authentication_only_identity_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'metadata.json'
+            identity = {'id': 123, 'private': False, 'temp_clone_token': 'synthetic-clone-token'}
+            path.write_text(json.dumps({'schema_version': 1, 'repository': 'atrinik/client',
+                'base': 'a' * 40, 'documents': {'https://api.github.com/repos/atrinik/protocol': identity}}))
+            with patch.object(updater, 'run', return_value='a' * 40), self.assertRaisesRegex(ValueError, 'non-public fields'):
+                updater.load_metadata(path, root, {'repository': 'atrinik/client', 'dependencies': [DEP]})
+            self.assertEqual(updater._DOCUMENTS, {})
+
     def test_direct_cargo_execution_rejects_read_token(self):
         with patch.dict(updater.os.environ, {'GITHUB_READ_TOKEN': 'fixture-token'}), patch.object(updater.subprocess, 'check_output') as execute, self.assertRaisesRegex(ValueError, 'credential-free'):
             updater.run('cargo', '+1.97.1', 'check')
@@ -673,12 +732,12 @@ class MetadataIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / 'metadata.json'
-            value = {'schema_version': 1, 'repository': 'atrinik/client', 'base': 'a' * 40, 'documents': {'https://api.github.com/repos/atrinik/protocol': {'id': 123}}}
+            value = {'schema_version': 1, 'repository': 'atrinik/client', 'base': 'a' * 40, 'documents': {'https://api.github.com/repos/atrinik/protocol': {'id': 123, 'private': False}}}
             path.write_text(json.dumps(value))
             policy = {'repository': 'atrinik/client', 'dependencies': [DEP]}
             with patch.object(updater, 'run', return_value='a' * 40):
                 updater.load_metadata(path, root, policy)
-            self.assertEqual(updater.document('https://api.github.com/repos/atrinik/protocol'), {'id': 123})
+            self.assertEqual(updater.document('https://api.github.com/repos/atrinik/protocol'), {'id': 123, 'private': False})
             with patch.object(updater, 'run', return_value='b' * 40), self.assertRaisesRegex(ValueError, 'different source base'):
                 updater.load_metadata(path, root, policy)
             value['repository'] = 'attacker/client'
@@ -713,7 +772,7 @@ class MetadataRequestBudgetTests(unittest.TestCase):
                 assets.append({'name': name, 'state': 'uploaded', 'size': len(data),
                                'browser_download_url': url, 'digest': 'sha256:' + hashlib.sha256(data).hexdigest()})
             prefix = 'https://api.github.com/repos/' + repo
-            responses[prefix] = json.dumps({'id': 123, 'full_name': repo}).encode()
+            responses[prefix] = json.dumps({'id': 123, 'full_name': repo, 'private': False}).encode()
             responses[prefix + '/releases?per_page=30'] = json.dumps([{'tag_name': tag, 'immutable': True,
                 'draft': False, 'prerelease': False, 'published_at': '2026-10-11', 'assets': assets}]).encode()
             responses[prefix + '/git/ref/tags/' + tag] = json.dumps({'object': {'type': 'commit', 'sha': revision}}).encode()
