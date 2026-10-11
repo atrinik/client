@@ -223,6 +223,11 @@ def source(dep, version=None):
             require(crate['asset'] == name and sums.count(crate['sha256'] + '  ' + name) == 1, 'source checksum manifest mismatch')
             require(hashlib.sha256(asset(name)).hexdigest() == crate['sha256'], 'source crate checksum mismatch')
             records.append(dict(crate, revision=revision, source_tag=tag))
+    if not records and version is None and legacy:
+        require(all(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', record['version']) for record in legacy),
+                'invalid historical registry version')
+        latest = max(legacy, key=lambda record: tuple(map(int, record['version'].split('.'))))
+        return source(dep, latest['version'])
     require(records, f'no reviewed source release for {dep["name"]}' + (f' = {version}' if version else ''))
     identities = [(record['name'], record['version']) for record in records]
     require(len(identities) == len(set(identities)), 'duplicate released crate version')

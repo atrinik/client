@@ -775,5 +775,65 @@ class AtomicRefTests(unittest.TestCase):
         api.assert_not_called()
 
 
+class ApprovedHistoricalFallbackTests(unittest.TestCase):
+    def dependency(self):
+        return dict(DEP, legacy=[{'version': '0.1.0', 'sha256': 'a' * 64},
+                                 {'version': VERSION, 'sha256': SHA}])
+
+    def test_complete_empty_inventory_uses_highest_approved_version(self):
+        with patch.object(updater, 'document', side_effect=[{'id': DEP['repository_id'], 'full_name': DEP['repository']}, []]), patch.object(updater, 'registry') as registry:
+            record = updater.source(self.dependency())
+        self.assertEqual(record, {'name': NAME, 'version': VERSION, 'sha256': SHA})
+        registry.assert_called_once_with(self.dependency(), VERSION, SHA)
+
+    def test_unknown_requested_version_does_not_fallback(self):
+        with patch.object(updater, 'document', side_effect=[{'id': DEP['repository_id'], 'full_name': DEP['repository']}, []]), patch.object(updater, 'registry') as registry, self.assertRaisesRegex(ValueError, 'no reviewed source release'):
+            updater.source(self.dependency(), '0.3.0')
+        registry.assert_not_called()
+
+    def test_incomplete_inventory_does_not_fallback(self):
+        identity = {'id': DEP['repository_id'], 'full_name': DEP['repository']}
+        with patch.object(updater, 'document', side_effect=[identity] + [[{}] * 30] * 10), patch.object(updater, 'registry') as registry, self.assertRaisesRegex(ValueError, 'discovery bound'):
+            updater.source(self.dependency())
+        registry.assert_not_called()
+
+    def test_corrupt_modern_release_does_not_fallback(self):
+        document, fetch = SourceManifestTests().fixture(checksum='b' * 64)
+        with document, fetch, patch.object(updater, 'registry') as registry, self.assertRaisesRegex(ValueError, 'crate checksum mismatch'):
+            updater.source(self.dependency())
+        registry.assert_not_called()
+
+    def test_unpublished_modern_package_does_not_fallback(self):
+        document, fetch = SourceManifestTests().fixture()
+        with document, fetch, patch.object(updater, 'registry', side_effect=ValueError('missing registry package')) as registry, self.assertRaisesRegex(ValueError, 'missing registry package'):
+            updater.source(self.dependency())
+        self.assertEqual(registry.call_count, 1)
+
+    def test_modern_manifest_without_this_crate_allows_approved_baseline(self):
+        document, fetch = SourceManifestTests().fixture()
+        dependency = dict(self.dependency(), name='other-protocol-crate')
+        with document, fetch, patch.object(updater, 'registry') as registry:
+            record = updater.source(dependency)
+        self.assertEqual(record['version'], VERSION)
+        self.assertEqual(record['name'], dependency['name'])
+        registry.assert_called_once_with(dependency, VERSION, SHA)
+
+    def test_approved_upgrade_from_legacy_point_one_is_prepared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'policy').mkdir()
+            (root / 'policy/released-dependencies.json').write_text(json.dumps({'schema_version': 1, 'repository': 'atrinik/client', 'dependencies': [self.dependency()]}))
+            (root / 'Cargo.toml').write_text('[workspace.dependencies]\natrinik-protocol = "=0.1.0"\n')
+            def run(*args, **kwargs):
+                if args[0] == 'cargo':
+                    (root / 'Cargo.lock').write_text('version=4\n[[package]]\nname="atrinik-protocol"\nversion="' + VERSION + '"\nsource="' + updater.REGISTRY + '"\nchecksum="' + SHA + '"\n')
+                return 'a' * 40
+            identity = {'id': DEP['repository_id'], 'full_name': DEP['repository']}
+            with patch('sys.argv', ['updater', 'prepare', '--root', str(root), '--output', str(root / 'candidate')]), patch.dict(updater.os.environ, {}, clear=True), patch.object(updater, 'document', side_effect=[identity, []]), patch.object(updater, 'registry'), patch.object(updater, 'run', side_effect=run):
+                updater.main()
+            self.assertEqual(json.loads((root / 'candidate/candidate.json').read_text())['records'][NAME]['version'], VERSION)
+            self.assertIn('"=0.2.0"', (root / 'Cargo.toml').read_text())
+
+
 if __name__ == '__main__':
     unittest.main()
