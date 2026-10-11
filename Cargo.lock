@@ -61,6 +61,8 @@ dependencies = [
 [[package]]
 name = "atrinik-protocol"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cda65c3c322993cfab378454fb9b1182df8a000216f4abd1170e53cdfdc3b3bb"
 dependencies = [
  "bytes",
  "idna",
