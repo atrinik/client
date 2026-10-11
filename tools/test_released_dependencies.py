@@ -55,7 +55,7 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(updater.source(dep, VERSION)['sha256'], SHA)
 
     def test_source_release_unavailable(self):
-        with patch.object(updater, 'document', return_value=[]), self.assertRaisesRegex(ValueError, 'no reviewed source release'):
+        with patch.object(updater, 'document', side_effect=[{'id': DEP['repository_id'], 'full_name': DEP['repository']}, []]), self.assertRaisesRegex(ValueError, 'no reviewed source release'):
             updater.source(DEP)
 
 
@@ -111,8 +111,6 @@ class ManifestTests(unittest.TestCase):
                 updater.lock_check(root, {NAME: {'version': VERSION, 'sha256': SHA}})
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 class SourceManifestTests(unittest.TestCase):
     def fixture(self, immutable=True, revision='a' * 40, provenance_revision='a' * 40, checksum=SHA):
@@ -131,6 +129,8 @@ class SourceManifestTests(unittest.TestCase):
                 'browser_download_url': f'https://github.com/{DEP["repository"]}/releases/download/{tag}/{name}',
                 'digest': 'sha256:' + hashlib.sha256(data).hexdigest()})
         def get(url):
+            if url == 'https://api.github.com/repos/' + DEP['repository']:
+                return {'id': DEP['repository_id'], 'full_name': DEP['repository']}
             return [release] if '/releases?' in url else {'object': {'type': 'commit', 'sha': revision}}
         return patch.object(updater, 'document', get), patch.object(updater, 'fetch', lambda url, absent=False: files[url.rsplit('/', 1)[1]])
 
@@ -162,7 +162,7 @@ class SourceManifestTests(unittest.TestCase):
             updater.source(DEP)
 
     def test_full_page_does_not_claim_latest(self):
-        with patch.object(updater, 'document', return_value=[{}] * 30), self.assertRaisesRegex(ValueError, 'discovery bound'):
+        with patch.object(updater, 'document', side_effect=[{'id': DEP['repository_id'], 'full_name': DEP['repository']}, [{}] * 30]), self.assertRaisesRegex(ValueError, 'discovery bound'):
             updater.source(DEP)
 
 
@@ -204,11 +204,11 @@ class CandidateBoundaryTests(unittest.TestCase):
         manifest = '[workspace.package]\nversion="0.1.0"\n[workspace.dependencies]\natrinik-protocol = "=0.1.0"\n'
         (root / 'Cargo.toml').write_text(manifest)
         (output / 'Cargo.toml').write_text(manifest.replace('"=0.1.0"', '"=0.2.0"'))
-        (output / 'Cargo.lock').write_text('[[package]]\nname="atrinik-protocol"\nversion="0.2.0"\nsource="' + updater.REGISTRY + '"\nchecksum="' + SHA + '"\n')
+        (output / 'Cargo.lock').write_text('version = 4\n[[package]]\nname="atrinik-protocol"\nversion="0.2.0"\nsource="' + updater.REGISTRY + '"\nchecksum="' + SHA + '"\n')
         record = {'name': NAME, 'version': VERSION, 'sha256': SHA}
         candidate = {'repository': 'atrinik/client', 'base': 'a' * 40, 'records': {NAME: record},
                      'title': 'chore(deps): update atrinik-protocol to 0.2.0',
-                     'files': {'Cargo.toml': SHA, 'Cargo.lock': SHA}}
+                     'files': {name: hashlib.sha256((output / name).read_bytes()).hexdigest() for name in ('Cargo.toml', 'Cargo.lock')}}
         return record, candidate, {'dependencies': [DEP]}
 
     def test_forged_manifest_exceeds_authenticated_pin_change(self):
@@ -252,3 +252,210 @@ class CandidateBoundaryTests(unittest.TestCase):
             with patch.object(updater, 'source', return_value=record), patch.object(updater, 'registry') as registry:
                 updater.verify_candidate(root, output, policy, candidate)
                 registry.assert_called_once_with({'name': NAME}, VERSION, SHA)
+
+class HardenedBoundaryTests(unittest.TestCase):
+    fixture = CandidateBoundaryTests.fixture
+    def test_small_crate_sparse_paths(self):
+        for name, expected in [('x', '1/x'), ('cc', '2/cc'), ('log', '3/l/log'),
+                               ('syn', '3/s/syn'), ('serde', 'se/rd/serde')]:
+            self.assertEqual(updater.index_path(name), expected)
+        for name in ['../evil', '', 'x/y', 'x' * 65]:
+            with self.assertRaises(ValueError):
+                updater.index_path(name)
+
+    def test_live_repository_id_mismatch(self):
+        with patch.object(updater, 'document', return_value={'id': 999, 'full_name': DEP['repository']}), self.assertRaisesRegex(ValueError, 'repository identity'):
+            updater.source(DEP)
+
+    def test_live_repository_rename_mismatch(self):
+        with patch.object(updater, 'document', return_value={'id': DEP['repository_id'], 'full_name': 'attacker/protocol'}), self.assertRaisesRegex(ValueError, 'repository identity'):
+            updater.source(DEP)
+
+    def test_unexpected_candidate_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = {'repository': 'atrinik/client', 'base': 'a' * 40, 'records': {}, 'title': '', 'files': {}, 'validated': True}
+            with self.assertRaisesRegex(ValueError, 'candidate schema'):
+                updater.verify_candidate(root, root, {}, candidate)
+
+    def test_forged_candidate_hashes_do_not_authorize_profile_edit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            path = output / 'Cargo.toml'
+            path.write_text(path.read_text() + '\n[profile.release]\noverflow-checks = false\n')
+            candidate['files']['Cargo.toml'] = hashlib.sha256(path.read_bytes()).hexdigest()
+            with patch.object(updater, 'source', return_value=record), self.assertRaisesRegex(ValueError, 'exceed exact dependency pins'):
+                updater.verify_candidate(root, output, policy, candidate)
+
+    def test_unknown_lock_schema_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            path = output / 'Cargo.lock'
+            path.write_text('evil = true\n' + path.read_text())
+            with patch.object(updater, 'source', return_value=record), self.assertRaisesRegex(ValueError, 'lock schema'):
+                updater.verify_candidate(root, output, policy, candidate)
+
+    def test_third_party_checksum_revalidated_including_short_names(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            path = output / 'Cargo.lock'
+            with path.open('a') as stream:
+                stream.write('\n[[package]]\nname="cc"\nversion="1.0.0"\nsource="' + updater.REGISTRY + '"\nchecksum="' + 'a' * 64 + '"\n')
+            with patch.object(updater, 'source', return_value=record), patch.object(updater, 'registry', side_effect=[{}, ValueError('registry checksum mismatch')]) as registry, self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                updater.verify_candidate(root, output, policy, candidate)
+            self.assertEqual(registry.call_args.args, ({'name': 'cc'}, '1.0.0', 'a' * 64))
+
+    def test_duplicate_and_missing_graph_entries(self):
+        package = {'name': 'cc', 'version': '1.0.0'}
+        with self.assertRaisesRegex(ValueError, 'duplicate lock package'):
+            updater.validate_graph([package, package], {})
+        with self.assertRaisesRegex(ValueError, 'missing internal'):
+            updater.validate_graph([package], {'app': '1.0.0'})
+        with self.assertRaisesRegex(ValueError, 'missing or ambiguous'):
+            updater.validate_graph([dict(package, dependencies=['absent'])], {})
+        with self.assertRaisesRegex(ValueError, 'missing or ambiguous'):
+            updater.validate_graph([dict(package, dependencies=['cc']), dict(package, version='2.0.0')], {})
+        updater.validate_graph([dict(package, dependencies=['cc 2.0.0']), dict(package, version='2.0.0')], {})
+
+    def test_symlink_and_size_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'data').write_text('1234')
+            (root / 'link').symlink_to(root / 'data')
+            with self.assertRaisesRegex(ValueError, 'bounded regular'):
+                updater.bounded_file(root / 'link')
+            with self.assertRaisesRegex(ValueError, 'bounded regular'):
+                updater.bounded_file(root / 'data', 3)
+
+    def test_equal_version_git_migration_is_not_noop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = {'git': 'https://github.com/atrinik/protocol', 'rev': 'a' * 40, 'version': VERSION}
+            (root / 'policy').mkdir()
+            (root / 'policy/released-dependencies.json').write_text(json.dumps({'schema_version': 1, 'repository': 'atrinik/client', 'dependencies': [dict(DEP, legacy_git=legacy)]}))
+            (root / 'Cargo.toml').write_text('[workspace.dependencies]\natrinik-protocol = {git="https://github.com/atrinik/protocol", rev="' + 'a' * 40 + '", version="' + VERSION + '"}\n')
+            lock = 'version=4\n[[package]]\nname="atrinik-protocol"\nversion="' + VERSION + '"\nsource="' + updater.REGISTRY + '"\nchecksum="' + SHA + '"\n'
+            def run(*args, **kwargs):
+                if args[0] == 'cargo':
+                    self.assertEqual(args, ('cargo', '+1.97.1', 'generate-lockfile'))
+                    (root / 'Cargo.lock').write_text(lock)
+                return 'a' * 40
+            output = root / 'candidate'
+            with patch('sys.argv', ['updater', 'prepare', '--root', str(root), '--output', str(output)]), patch.dict(updater.os.environ, {}, clear=True), patch.object(updater, 'source', return_value={'name': NAME, 'version': VERSION, 'sha256': SHA}), patch.object(updater, 'run', side_effect=run):
+                updater.main()
+            self.assertTrue((output / 'candidate.json').is_file())
+            self.assertIn('atrinik-protocol = "=0.2.0"', (root / 'Cargo.toml').read_text())
+
+    def test_authoritative_lock_mismatch_fails_without_executing_candidate(self):
+        import io
+        import tarfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = self.fixture(root, output)
+            (output / 'candidate.json').write_text(json.dumps(candidate))
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode='w') as tar:
+                tar.add(root / 'Cargo.toml', arcname='Cargo.toml')
+            def run(*args, **kwargs):
+                if args[:2] == ('git', 'rev-parse'):
+                    return candidate['base']
+                if args[0] == 'cargo':
+                    self.assertEqual(args, ('cargo', '+1.97.1', 'generate-lockfile'))
+                    (kwargs['cwd'] / 'Cargo.lock').write_text('different authoritative lock')
+                return ''
+            with patch.object(updater, 'verify_candidate'), patch.object(updater.subprocess, 'check_output', return_value=archive.getvalue()), patch.object(updater, 'run', side_effect=run), self.assertRaisesRegex(ValueError, 'authoritative Cargo resolution'):
+                updater.verify_lock(root, output, policy)
+
+
+class BotHeadTests(unittest.TestCase):
+    def fixture(self, login='atrinik-crate-dependency-update[bot]', verified=True, changed='Cargo.toml'):
+        commit = {'author': {'login': login}, 'committer': {'login': login}, 'commit': {'message': 'chore(deps): update atrinik-protocol to 0.2.0', 'verification': {'verified': verified, 'reason': 'valid'}}, 'parents': [{'sha': 'b' * 40}]}
+        old = {'truncated': False, 'tree': [{'path': changed, 'mode': '100644', 'type': 'blob', 'sha': 'a' * 40}]}
+        new = {'truncated': False, 'tree': [{'path': changed, 'mode': '100644', 'type': 'blob', 'sha': 'b' * 40}]}
+        return patch.object(updater, 'gh_api', side_effect=[commit, {'status': 'ahead'}, old, new])
+
+    def verify(self):
+        updater.verify_owned_head('atrinik/client', {'head': {'sha': 'a' * 40}}, 'c' * 40, 'atrinik-crate-dependency-update[bot]')
+
+    def test_verified_owned_head(self):
+        with self.fixture():
+            self.verify()
+
+    def test_human_tip_on_bot_pr_preserved(self):
+        with self.fixture(login='human'), self.assertRaisesRegex(ValueError, 'foreign commit'):
+            self.verify()
+
+    def test_spoofed_unsigned_bot_tip_preserved(self):
+        with self.fixture(verified=False), self.assertRaisesRegex(ValueError, 'unverified'):
+            self.verify()
+
+    def test_unexpected_files_preserved(self):
+        with self.fixture(changed='src/main.rs'), self.assertRaisesRegex(ValueError, 'unexpected edits'):
+            self.verify()
+
+
+class PublisherRaceTests(unittest.TestCase):
+    def exercise(self, owned=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'candidate'
+            output.mkdir()
+            record, candidate, policy = CandidateBoundaryTests().fixture(root, output)
+            policy.update(repository='atrinik/client', repository_id=1)
+            (output / 'candidate.json').write_text(json.dumps(candidate))
+            pr = OwnershipTests().pr()
+            pr['number'] = 1
+            calls = []
+            def api(endpoint, method='GET', body=None):
+                calls.append((endpoint, method, body))
+                if endpoint.startswith('installation/'):
+                    return {'total_count': 1, 'repositories': [{'full_name': 'atrinik/client', 'id': 1}]}
+                if endpoint.endswith('/git/ref/heads/main'):
+                    count = sum(call[0] == endpoint for call in calls)
+                    return {'object': {'sha': candidate['base'] if count == 1 or owned else 'b' * 40}}
+                if '/pulls?' in endpoint:
+                    return [pr] if owned else []
+                if '/contents/' in endpoint:
+                    data = b'[workspace.dependencies]\natrinik-protocol="=0.1.0"\n'
+                    return {'encoding': 'base64', 'size': len(data), 'content': updater.base64.b64encode(data).decode()}
+                if method == 'POST':
+                    return {'sha': 'c' * 40}
+                if '/git/commits/' in endpoint:
+                    return {'tree': {'sha': 'd' * 40}}
+                if endpoint.endswith('/pulls/1'):
+                    return dict(pr, head=dict(pr['head'], sha='e' * 40))
+                self.fail(f'unexpected API operation: {endpoint} {method}')
+            def run(*args, **kwargs):
+                if args[:2] == ('git', 'rev-parse'):
+                    return candidate['base']
+                if args[:2] == ('git', 'status'):
+                    return ''
+                if args[:2] == ('git', 'diff'):
+                    return 'Cargo.lock\nCargo.toml'
+                self.fail(f'unexpected command: {args}')
+            expected = 'owned bot PR changed' if owned else 'main advanced before branch mutation'
+            with patch.dict(updater.os.environ, {'CRATE_DEPENDENCY_UPDATE_APP_SLUG': 'atrinik-crate-dependency-update'}), patch.object(updater, 'verify_candidate'), patch.object(updater, 'verify_owned_head'), patch.object(updater, 'run', side_effect=run), patch.object(updater, 'gh_api', side_effect=api), self.assertRaisesRegex(ValueError, expected):
+                updater.publish(root, output, policy)
+            self.assertFalse(any('/git/refs' in endpoint and method != 'GET' for endpoint, method, body in calls))
+            self.assertFalse(any('/pulls' in endpoint and method != 'GET' for endpoint, method, body in calls))
+
+    def test_main_advances_before_ref_write(self):
+        self.exercise()
+
+    def test_human_pushes_to_owned_pr_before_ref_write(self):
+        self.exercise(owned=True)
+
+
+if __name__ == '__main__':
+    unittest.main()
