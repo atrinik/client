@@ -6,14 +6,16 @@
   "transitive_license_allowlist": ["Apache-2.0", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "MIT", "Unicode-3.0", "Zlib"],
   "eol_response": "upgrade, replace, or remove before an unsupported release ships",
   "direct_dependencies": [
-    {"name":"atrinik-protocol","native":null,"license":"MIT","source":"https://crates.io/crates/atrinik-protocol","purpose":"released Game Protocol 1 static-directory parser and bounds","validation":"Cargo.lock, protocol fixtures, cargo-deny, unit tests, SBOM"},
+    {"name":"atrinik-protocol","native":null,"license":"MIT","source":"https://crates.io/crates/atrinik-protocol","purpose":"released Game Protocol 1 access negotiation, static-directory, and resolve parser contracts","validation":"Cargo.lock, protocol fixtures, cargo-deny, unit tests, SBOM"},
     {"name":"httpdate","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/httpdate","purpose":"strict static-directory Last-Modified and Retry-After handling","validation":"Cargo.lock, cargo-deny, metadata boundary tests, SBOM"},
     {"name":"sdl3","native":"SDL 3.4.18","license":"MIT AND Zlib","source":"https://crates.io/crates/sdl3","purpose":"isolated platform/window/input/audio boundary","validation":"Cargo.lock, cargo-deny, source-static build, Linux/Windows checks"},
     {"name":"sha2","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/sha2","purpose":"authenticated resource and static-directory body/cache identity digest verification","validation":"Cargo.lock, cargo-deny, unit tests, SBOM"},
-    {"name":"ureq","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/ureq","purpose":"bounded blocking HTTPS retrieval of the fixed static directory origin","validation":"Cargo.lock, cargo-deny, fixed-request transport tests, Linux/Windows builds, SBOM"}
+    {"name":"ureq","native":null,"license":"MIT OR Apache-2.0","source":"https://crates.io/crates/ureq","purpose":"bounded blocking HTTPS retrieval of the fixed static directory and access-resolve origins","validation":"Cargo.lock, cargo-deny, fixed-request transport tests, Linux/Windows builds, SBOM"},
+    {"name":"x509-cert","native":null,"license":"Apache-2.0 OR MIT","source":"https://crates.io/crates/x509-cert","purpose":"bounded DER parsing and SubjectPublicKeyInfo encoding for certificate and GP1 identity derivation","validation":"Cargo.lock, cargo-deny, protocol certificate fixture tests, SBOM"},
+    {"name":"zeroize","native":null,"license":"Apache-2.0 OR MIT","source":"https://crates.io/crates/zeroize","purpose":"best-effort clearing of access codes, route capabilities, nonces, grants, and private response buffers","validation":"Cargo.lock, cargo-deny, access boundary tests, SBOM"}
   ],
   "compatibility": [
-    {"name":"atrinik/protocol","contract":"game-protocol-1 and atrinik-directory-v1","dependency_status":"released crates.io package pinned exactly; path and Git dependencies forbidden"},
+    {"name":"atrinik/protocol","contract":"game-protocol-1.1, atrinik-game-directory-v2, and atrinik-access-resolved-v1","dependency_status":"0.2.0 release required on crates.io and pinned exactly; path and Git dependencies forbidden"},
     {"name":"atrinik/renderer","contract":"scene-snapshot-1","dependency_status":"awaiting released registry crate; path and Git dependencies forbidden"}
   ],
   "host_build_dependencies": [

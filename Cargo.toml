@@ -25,7 +25,7 @@ atrinik-actions = { path = "crates/atrinik-actions", version = "=0.1.0" }
 atrinik-config-cache = { path = "crates/atrinik-config-cache", version = "=0.1.0" }
 atrinik-directory = { path = "crates/atrinik-directory", version = "=0.1.0" }
 atrinik-platform = { path = "crates/atrinik-platform", version = "=0.1.0" }
-atrinik-protocol = "=0.1.0"
+atrinik-protocol = "=0.2.0"
 atrinik-protocol-adapter = { path = "crates/atrinik-protocol-adapter", version = "=0.1.0" }
 atrinik-scene-adapter = { path = "crates/atrinik-scene-adapter", version = "=0.1.0" }
 atrinik-session = { path = "crates/atrinik-session", version = "=0.1.0" }
@@ -35,6 +35,8 @@ httpdate = "1.0.3"
 sdl3 = { version = "0.20.0", default-features = false, features = ["build-from-source-static"] }
 sha2 = "0.11.0"
 ureq = { version = "3.4.0", default-features = false, features = ["gzip", "rustls"] }
+x509-cert = { version = "0.3.0", default-features = false, features = ["std"] }
+zeroize = "1.9.0"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
