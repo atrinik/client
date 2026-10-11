@@ -175,8 +175,7 @@ pub fn negotiate_server_access(
         Ok(AccessPolicy::Protected) => Event::AccessRequired,
         Ok(AccessPolicy::Unspecified) | Err(_) => return Err(AccessAdapterError::InvalidPolicy),
     };
-    validation::access_server_hello(hello)
-        .map_err(|_| AccessAdapterError::InvalidServerHello)?;
+    validation::access_server_hello(hello).map_err(|_| AccessAdapterError::InvalidServerHello)?;
     Ok(AccessNegotiation { session_id, event })
 }
 
