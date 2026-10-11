@@ -13,7 +13,7 @@ install -d "${output}"
 output=$(realpath "${output}")
 
 ATRINIK_RUST_VERSION=rust-1.97.1 ATRINIK_VERSION="${version}" cargo auditable build --locked --release --package atrinik-client
-cp target/release/atrinik-client LICENSE PROVENANCE.md THIRD_PARTY_NOTICES.md "${stage}/"
+cp "${CARGO_TARGET_DIR:-target}/release/atrinik-client" LICENSE PROVENANCE.md THIRD_PARTY_NOTICES.md "${stage}/"
 strip --strip-debug "${stage}/atrinik-client"
 tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -C "${stage}" -cf - . | gzip -n >"${output}/atrinik-client-${version}-linux-amd64.tar.gz"
 git archive --format=tar --prefix="atrinik-client-${version}/" HEAD | gzip -n >"${output}/atrinik-client-${version}-source.tar.gz"

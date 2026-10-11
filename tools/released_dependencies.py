@@ -204,6 +204,39 @@ def choose_pr(pulls, version_title, branch, bot, repo):
     return 'create', None
 
 
+def verify_candidate(root, output, policy, candidate):
+    require(set(candidate) == {'repository', 'base', 'records', 'title', 'files'}, 'unexpected candidate schema')
+    pins = exact_dependencies(root, policy)
+    require(set(candidate['records']) == set(pins), 'candidate dependency scope changed')
+    records = {}
+    text = (root / 'Cargo.toml').read_text()
+    for dep in policy['dependencies']:
+        record = candidate['records'][dep['name']]
+        require(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', record['version']), 'invalid candidate version')
+        authenticated = source(dep, record['version'])
+        require(record == authenticated, 'candidate source provenance changed')
+        require(tuple(map(int, record['version'].split('.'))) >= tuple(map(int, pins[dep['name']].split('.'))), 'candidate downgrade prohibited')
+        name = dep['name']
+        text, count = re.subn(r'(?m)^' + re.escape(name) + r' = [^\n]+$',
+                             f'{name} = "={record["version"]}"', text)
+        require(count == 1, 'unsupported trusted manifest declaration')
+        records[name] = authenticated
+    require((output / 'Cargo.toml').read_text() == text, 'candidate changes exceed exact dependency pins')
+    expected_title = 'chore(deps): update ' + ', '.join(f'{name} to {record["version"]}' for name, record in records.items())
+    require(candidate['title'] == expected_title and set(candidate['files']) == {'Cargo.toml', 'Cargo.lock'}, 'candidate metadata scope changed')
+    packages = tomllib.loads((output / 'Cargo.lock').read_text())['package']
+    trusted_workspace_version = tomllib.loads((root / 'Cargo.toml').read_text())['workspace']['package']['version']
+    internal = {tomllib.loads(path.read_text())['package']['name']: tomllib.loads(path.read_text())['package'].get('version', trusted_workspace_version) for path in root.glob('crates/*/Cargo.toml')}
+    internal = {name: trusted_workspace_version if isinstance(version, dict) else version for name, version in internal.items()}
+    for package in packages:
+        if package['name'] in internal:
+            require('source' not in package and 'checksum' not in package and package['version'] == internal[package['name']], 'internal lock package identity changed')
+        else:
+            require(package.get('source') == REGISTRY and re.fullmatch('[0-9a-f]{64}', package.get('checksum', '')), 'candidate lock contains non-registry source')
+            registry({'name': package['name']}, package['version'], package['checksum'])
+    lock_check(output, records)
+
+
 def publish(root, output, policy):
     candidate = json.loads((output / 'candidate.json').read_text())
     require(candidate['repository'] == policy['repository'], 'candidate repository drift')
@@ -215,6 +248,7 @@ def publish(root, output, policy):
     require(installation['total_count'] == 1 and any(item['full_name'] == repo and item['id'] == policy['repository_id'] for item in installation['repositories']), 'unexpected App installation scope')
     main = gh_api(f'repos/{repo}/git/ref/heads/main')['object']['sha']
     require(main == candidate['base'] and run('git', 'rev-parse', 'HEAD', cwd=root) == main, 'main advanced; rerun credential-free preparation')
+    verify_candidate(root, output, policy, candidate)
     pulls = gh_api(f'repos/{repo}/pulls?state=open&per_page=100')
     require(len(pulls) < 100, 'PR inventory truncated; refusing mutation')
     for existing in pulls:
