@@ -4,18 +4,18 @@
 import argparse
 import base64
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
-import tempfile
 import tarfile
-import io
+import tempfile
 import tomllib
 import urllib.error
 import urllib.request
-import stat
 
 REGISTRY = 'registry+https://github.com/rust-lang/crates.io-index'
 MAX_BYTES = 32 * 1024 * 1024
@@ -225,11 +225,16 @@ def choose_pr(pulls, version_title, branch, bot, repo):
 
 
 def bounded_file(path, maximum=MAX_BYTES):
-    info = path.lstat()
-    require(stat.S_ISREG(info.st_mode) and info.st_size <= maximum, 'candidate file is not a bounded regular file')
-    data = path.read_bytes()
-    require(len(data) <= maximum, 'candidate file exceeds bound')
-    return data
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        raise ValueError('candidate file is not a bounded regular file') from error
+    with os.fdopen(descriptor, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_size <= maximum, 'candidate file is not a bounded regular file')
+        data = stream.read(maximum + 1)
+        require(len(data) <= maximum, 'candidate file exceeds bound')
+        return data
 
 
 def validate_graph(packages, internal):
