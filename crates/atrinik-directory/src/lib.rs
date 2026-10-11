@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Fixed-origin, bounded, transactional Game Protocol 1 server discovery.
 
+pub mod access;
 pub mod cache;
 pub mod transport;
 
@@ -145,7 +146,7 @@ impl DirectoryView {
         Ok(DiscoveredConnectionPlan {
             server_id: server.server_id,
             certificate_sha256: server.certificate_sha256,
-            password_required: server.password_required,
+            access_required: server.access_required,
             direct_endpoint: server.endpoint.clone(),
             rendezvous_url,
         })
@@ -162,7 +163,7 @@ pub enum RendezvousSupport {
 pub struct DiscoveredConnectionPlan {
     pub server_id: [u8; 32],
     pub certificate_sha256: [u8; 32],
-    pub password_required: bool,
+    pub access_required: bool,
     pub direct_endpoint: Option<DirectEndpoint>,
     pub rendezvous_url: Option<String>,
 }
@@ -607,11 +608,11 @@ mod tests {
     const PUBLISHED_AT: u64 = GENERATED_AT;
     const CANONICAL: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../fixtures/metaserver-directory-v1/canonical.json"
+        "/../../fixtures/metaserver-directory-v2/canonical.json"
     ));
-    const EMPTY: &[u8] = b"{\"schema\":\"atrinik-directory-v1\",\"generation\":\"1\",\"generatedAt\":\"1786219200\",\"expiresAt\":\"1786233600\",\"servers\":[]}\n";
+    const EMPTY: &[u8] = b"{\"schema\":\"atrinik-game-directory-v2\",\"generation\":\"1\",\"generatedAt\":\"1786219200\",\"expiresAt\":\"1786233600\",\"servers\":[]}\n";
     const EXPECTED_BODY_SHA256: &str =
-        "059f559d0fe439576cae10bd623eb79ab6dfd6d0a78420563730c07cf9727d78";
+        "4fa5013b204c97668b8a3ff719b5b0aaa33dbe8b5cf90d2e90bb436a91d406fa";
     const EXPECTED_ETAG: &str = "\"0123456789abcdef0123456789abcdef\"";
 
     #[derive(Default)]

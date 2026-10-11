@@ -882,7 +882,7 @@ mod tests {
         let root = test_root("privacy");
         let body = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../fixtures/metaserver-directory-v1/canonical.json"
+            "/../../fixtures/metaserver-directory-v2/canonical.json"
         ));
         let mut cache = FileDirectoryCache::new(&root);
         cache.store(&record(42, body)).expect("store");

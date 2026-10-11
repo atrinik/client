@@ -10,6 +10,9 @@ repository.workspace = true
 atrinik-actions.workspace = true
 atrinik-protocol.workspace = true
 atrinik-session.workspace = true
+sha2.workspace = true
+x509-cert.workspace = true
+zeroize.workspace = true
 
 [lints]
 workspace = true

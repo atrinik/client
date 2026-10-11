@@ -7,10 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+atrinik-protocol.workspace = true
 atrinik-protocol-adapter.workspace = true
 httpdate.workspace = true
 sha2.workspace = true
 ureq.workspace = true
+zeroize.workspace = true
 
 [lints]
 workspace = true
