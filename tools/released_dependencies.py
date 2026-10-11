@@ -53,7 +53,7 @@ def fetch(url, absent=False):
     headers = {'User-Agent': 'atrinik-dependency-readiness'}
     token = os.environ.get('GITHUB_READ_TOKEN')
     if token and urllib.parse.urlparse(url).hostname == 'api.github.com':
-        require(re.fullmatch(r'https://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/releases\?per_page=30|/git/ref/tags/v[0-9]+\.[0-9]+\.[0-9]+|/git/tags/[0-9a-f]{40})?', url),
+        require(re.fullmatch(r'https://api\.github\.com/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/releases\?per_page=30(?:&page=(?:[2-9]|10))?|/git/ref/tags/v[0-9]+\.[0-9]+\.[0-9]+|/git/tags/[0-9a-f]{40})?', url),
                 'unexpected authenticated metadata URL')
         headers['Authorization'] = 'Bearer ' + token
     try:
@@ -174,9 +174,16 @@ def source(dep, version=None):
     api = f'https://api.github.com/repos/{repo}'
     identity = document(api)
     require(identity.get('id') == dep['repository_id'] and identity.get('full_name') == repo, 'upstream repository identity changed')
-    releases = document(f'{api}/releases?per_page=30')
-    require(isinstance(releases, list) and len(releases) <= 30, 'release inventory truncated; narrow release discovery')
-    require(len(releases) < 30, 'release history exceeds discovery bound; cannot establish latest candidate')
+    releases = []
+    for page in range(1, 11):
+        suffix = '' if page == 1 else f'&page={page}'
+        items = document(f'{api}/releases?per_page=30{suffix}')
+        require(isinstance(items, list) and len(items) <= 30, 'invalid release inventory page')
+        releases.extend(items)
+        if len(items) < 30:
+            break
+    else:
+        raise ValueError('release history exceeds discovery bound; cannot establish latest candidate')
     records = []
     for release in releases:
         if release['draft'] or release['prerelease']:
@@ -463,7 +470,8 @@ def publish(root, output, policy):
         gh_api(f'repos/{repo}/git/refs', 'POST', {'ref': 'refs/heads/' + branch, 'sha': update['sha']})
     elif mode == 'owned':
         fresh = gh_api(f'repos/{repo}/pulls/{pr["number"]}')
-        require(fresh['user']['login'] == bot and fresh['head']['sha'] == pr['head']['sha'] and
+        require(fresh.get('state') == 'open' and fresh.get('base', {}).get('ref') == 'main' and
+                fresh['user']['login'] == bot and fresh['head']['sha'] == pr['head']['sha'] and
                 fresh['head']['ref'] == branch and (fresh['head'].get('repo') or {}).get('full_name') == repo,
                 'owned bot PR changed before mutation')
         require(gh_api(f'repos/{repo}/git/ref/heads/{branch}')['object']['sha'] == pr['head']['sha'], 'bot branch advanced')

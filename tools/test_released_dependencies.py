@@ -161,8 +161,20 @@ class SourceManifestTests(unittest.TestCase):
         with document, fetch, self.assertRaisesRegex(ValueError, 'crate checksum mismatch'):
             updater.source(DEP)
 
+    def test_release_discovery_reads_a_second_page(self):
+        seen = []
+        def get(url):
+            seen.append(url)
+            if url.endswith('/protocol'):
+                return {'id': DEP['repository_id'], 'full_name': DEP['repository']}
+            return [] if '&page=2' in url else [{'draft': True}] * 30
+        with patch.object(updater, 'document', side_effect=get), self.assertRaisesRegex(ValueError, 'no reviewed source release'):
+            updater.source(DEP)
+        self.assertEqual(len(seen), 3)
+        self.assertTrue(seen[-1].endswith('per_page=30&page=2'))
+
     def test_full_page_does_not_claim_latest(self):
-        with patch.object(updater, 'document', side_effect=[{'id': DEP['repository_id'], 'full_name': DEP['repository']}, [{}] * 30]), self.assertRaisesRegex(ValueError, 'discovery bound'):
+        with patch.object(updater, 'document', side_effect=[{'id': DEP['repository_id'], 'full_name': DEP['repository']}] + [[{}] * 30] * 10), self.assertRaisesRegex(ValueError, 'discovery bound'):
             updater.source(DEP)
 
 
@@ -406,7 +418,7 @@ class BotHeadTests(unittest.TestCase):
 
 
 class PublisherRaceTests(unittest.TestCase):
-    def exercise(self, owned=False):
+    def exercise(self, owned=False, pr_change=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / 'candidate'
@@ -416,6 +428,7 @@ class PublisherRaceTests(unittest.TestCase):
             (output / 'candidate.json').write_text(json.dumps(candidate))
             pr = OwnershipTests().pr()
             pr['number'] = 1
+            pr['state'] = 'open'
             calls = []
             def api(endpoint, method='GET', body=None):
                 calls.append((endpoint, method, body))
@@ -436,6 +449,10 @@ class PublisherRaceTests(unittest.TestCase):
                 if '/git/commits/' in endpoint:
                     return {'tree': {'sha': 'd' * 40}}
                 if endpoint.endswith('/pulls/1'):
+                    if pr_change == 'closed':
+                        return dict(pr, state='closed')
+                    if pr_change == 'retargeted':
+                        return dict(pr, base={'ref': 'maintenance'})
                     return dict(pr, head=dict(pr['head'], sha='e' * 40))
                 self.fail(f'unexpected API operation: {endpoint} {method}')
             def run(*args, **kwargs):
@@ -457,6 +474,12 @@ class PublisherRaceTests(unittest.TestCase):
 
     def test_human_pushes_to_owned_pr_before_ref_write(self):
         self.exercise(owned=True)
+
+    def test_owned_pr_closed_before_ref_write(self):
+        self.exercise(owned=True, pr_change='closed')
+
+    def test_owned_pr_retargeted_before_ref_write(self):
+        self.exercise(owned=True, pr_change='retargeted')
 
 
 class ManifestOptionTests(unittest.TestCase):
