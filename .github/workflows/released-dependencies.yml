@@ -53,6 +53,18 @@ jobs:
           git clone --no-hardlinks --config core.hooksPath=/dev/null \
             "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}/dependency-validation-source"
           if test -f "${candidate}/candidate.json"; then
+            docker run --rm --init --cpus 2 --read-only --cap-drop ALL \
+              --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+              --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
+              --mount "type=bind,source=${RUNNER_TEMP}/dependency-validation-source,target=/repo,readonly" \
+              --mount "type=bind,source=${candidate},target=/candidate,readonly" \
+              --mount "type=bind,source=${RUNNER_TEMP}/dependency-cache,target=/cache" \
+              --workdir /repo --env HOME=/tmp/dependency-home \
+              --env CARGO_HOME=/cache/verify-cargo --env CARGO_TARGET_DIR=/cache/verify-target \
+              --env RUSTUP_TOOLCHAIN=1.97.1 --env CARGO_BUILD_JOBS=2 "${BUILD_IMAGE}" bash -euc '
+                mkdir -p "$HOME"
+                python3 tools/released_dependencies.py verify-lock --root . --candidate /candidate
+              '
             cp "${candidate}/Cargo.toml" "${candidate}/Cargo.lock" "${RUNNER_TEMP}/dependency-validation-source/"
             git -C "${RUNNER_TEMP}/dependency-validation-source" \
               -c user.name=dependency-candidate -c user.email=dependency-candidate@users.noreply.github.com \

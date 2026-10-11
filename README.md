@@ -109,7 +109,9 @@ registry dependency is eligible; renderer updates become eligible when a real
 renderer adapter consumes its released crates. The updater verifies immutable
 upstream source-release manifests and crates.io API, index and archive checksums,
 then generates the exact registry pin and lockfile without executing dependency
-code. Candidate files are sealed before a separate credential-free pinned CPU
+code. A second credential-free worker independently regenerates and compares the
+lockfile from the trusted manifest. Candidate files are sealed before a separate
+credential-free pinned CPU
 worker tests a read-only source snapshot; that worker cannot modify the sealed
 PR artifact. A separate job uses the selected-repository
 `atrinik-crate-dependency-update` GitHub App to open or update its owned dependency
