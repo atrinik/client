@@ -92,3 +92,9 @@
 - For coordinated work, use an `atrinik/atrinik` profile for released-package
   overrides. Wrapper build/runtime adapters are not available yet; do not route
   this replacement client through classic code or claim wrapper topology proof.
+- Dependency review is advisory, including operational errors. Before merge, the
+  implementing Codex must read its PR comment or job summary, fix actionable
+  introduced risk, or record explicit maintainer acceptance of existing risk.
+  Fork and Dependabot comment permissions may be restricted; read the job
+  summary when the comment is unavailable. Validate workflow changes with
+  actionlint and `git diff --check`.
