@@ -539,7 +539,17 @@ def publish(root, output, policy):
     update_ref(repository_id, branch, previous_head, update['sha'])
     if mode in {'create', 'reuse'}:
         gh_api(f'repos/{repo}/pulls', 'POST', {'title': candidate['title'], 'head': branch,
-               'base': 'main', 'body': 'Updates exact released registry dependencies and Cargo.lock.\n\nSource release provenance, crates.io API/index/archive checksums, and credential-free Cargo resolution passed. Required application CI and review must pass before merge. No automatic merge.'})
+               'base': 'main', 'body': (
+                   '## Summary\n\n'
+                   'Update exact released registry dependencies and Cargo.lock.\n\n'
+                   '## Implementation\n\n'
+                   'Use verified upstream releases and registry packages for the dependency pins and resolved lockfile.\n\n'
+                   '## Validation\n\n'
+                   'Source release provenance, crates.io API/index/archive checksums, and credential-free Cargo resolution passed. '
+                   'The candidate completed isolated consumer and application validation before publication.\n\n'
+                   '## Limitations\n\n'
+                   'Required application CI and review on this PR must pass before merge. No automatic merge.'
+               )})
     # Preserve the existing PR title/body as contributor text.
 
 
