@@ -10,29 +10,39 @@ set -euo pipefail
 repository=$(git rev-parse --show-toplevel)
 cd "${repository}"
 
+# Prints one "ID:crate@version" key per denied finding. Yanked crates carry no
+# advisory ID, so the crate coordinates keep distinct findings distinct.
 advisory_ids() {
-  local directory=$1 output
+  local directory=$1 output status=0
   output=$(mktemp)
-  # cargo-deny exits non-zero when it finds advisories; the IDs decide below.
-  (cd "${directory}" && cargo deny --locked --format json check advisories 2>"${output}" >/dev/null) || true
-  python3 - "${output}" <<'PY'
+  (cd "${directory}" && cargo deny --locked --format json check advisories 2>"${output}" >/dev/null) || status=$?
+  python3 - "${output}" "${status}" <<'PY' || { rm -f -- "${output}"; return 1; }
 import json, sys
-ids = set()
+keys, summary = set(), False
 for line in open(sys.argv[1], encoding='utf-8'):
     try:
         entry = json.loads(line)
     except json.JSONDecodeError:
         continue
     fields = entry.get('fields', {})
-    if entry.get('type') == 'diagnostic' and fields.get('severity') == 'error':
+    if entry.get('type') == 'summary':
+        summary = True
+    elif entry.get('type') == 'diagnostic' and fields.get('severity') == 'error':
         advisory = fields.get('advisory') or {}
-        ids.add(advisory.get('id') or fields.get('code') or 'unknown')
-print('\n'.join(sorted(ids)))
+        crates = [graph.get('Krate') or {} for graph in fields.get('graphs') or []]
+        coordinates = ','.join(sorted(f"{krate.get('name')}@{krate.get('version')}" for krate in crates)) or 'unknown'
+        keys.add(f"{advisory.get('id') or fields.get('code') or 'unknown'}:{coordinates}")
+# A non-zero exit is only an advisory result when cargo-deny completed its
+# check and reported the findings; anything else is an operational failure.
+if int(sys.argv[2]) != 0 and not (summary and keys):
+    sys.exit(f'cargo-deny advisories check failed (exit {sys.argv[2]}) without reporting advisories:\n'
+             + open(sys.argv[1], encoding='utf-8').read()[-4000:])
+print('\n'.join(sorted(keys)))
 PY
   rm -f -- "${output}"
 }
 
-head_ids=$(advisory_ids .)
+head_ids=$(advisory_ids .) || exit 1
 if [ -z "${head_ids}" ]; then
   echo "advisories ok"
   exit 0
@@ -47,7 +57,7 @@ fi
 worktree=$(mktemp -d /tmp/atrinik-client-advisory-base.XXXXXX)
 trap 'git worktree remove --force "${worktree}" >/dev/null 2>&1 || rm -rf -- "${worktree}"' EXIT
 git worktree add --detach --quiet "${worktree}" "${base}"
-base_ids=$(advisory_ids "${worktree}")
+base_ids=$(advisory_ids "${worktree}") || exit 1
 
 introduced=$(comm -23 <(printf '%s\n' "${head_ids}") <(printf '%s\n' "${base_ids}" | sed '/^$/d'))
 if [ -n "${introduced}" ]; then
