@@ -19,8 +19,8 @@ human-written code contributions are welcome under the same controls.
 
 The game content and media presented by the client are external inputs, not
 part of the client's MIT-licensed code. Atrinik's pixel art, maps, stories,
-music, and sound effects remain human-created work with their exact authors,
-upstream credit, licenses, and notices. See the
+music, and sound effects keep their exact authors, upstream credit, licenses,
+and notices in their source repositories. See the
 [canonical project authorship statement](https://github.com/atrinik/atrinik/issues/331)
 and the [replacement roadmap](https://github.com/atrinik/atrinik/issues/168)
 for the project-wide identity and implementation direction.
