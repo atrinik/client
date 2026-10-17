@@ -1,0 +1,32 @@
+name: Dependency advisories
+on:
+  schedule:
+    - cron: '41 6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: client-dependency-advisories
+  cancel-in-progress: true
+jobs:
+  advisories:
+    if: github.ref == 'refs/heads/main'
+    name: Main branch advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned cargo-deny
+        run: |
+          install -d "${RUNNER_TEMP}/tools/cargo-deny" "${RUNNER_TEMP}/bin"
+          curl --fail --silent --show-error --location https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz --output "${RUNNER_TEMP}/cargo-deny.tar.gz"
+          printf '%s  %s\n' 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f "${RUNNER_TEMP}/cargo-deny.tar.gz" | sha256sum --check --strict
+          tar -xzf "${RUNNER_TEMP}/cargo-deny.tar.gz" -C "${RUNNER_TEMP}/tools/cargo-deny" --strip-components=1
+          install "${RUNNER_TEMP}/tools/cargo-deny/cargo-deny" "${RUNNER_TEMP}/bin/cargo-deny"
+          echo "${RUNNER_TEMP}/bin" >>"${GITHUB_PATH}"
+      - run: rustup toolchain install 1.97.1 --profile minimal
+      # Pull requests only fail on advisories they introduce, so this is where
+      # a newly published advisory against main's Cargo.lock shows up.
+      - run: tools/check-advisories.sh

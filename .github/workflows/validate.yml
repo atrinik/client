@@ -40,6 +40,8 @@ jobs:
           tar -xzf "${RUNNER_TEMP}/syft.tar.gz" -C "${RUNNER_TEMP}/bin" syft
           echo "${RUNNER_TEMP}/bin" >>"${GITHUB_PATH}"
       - run: tools/validate.sh
+        env:
+          ADVISORY_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
 
   windows:
     name: Windows build and tests

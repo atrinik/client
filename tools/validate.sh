@@ -12,7 +12,8 @@ cargo fmt --all --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace --all-targets
 cargo test --locked --workspace --doc
-cargo deny --locked check
+cargo deny --locked check bans licenses sources
+tools/check-advisories.sh
 tools/check-foundations.sh
 cargo run --locked --quiet --package atrinik-client -- version
 cargo run --locked --quiet --package atrinik-client -- headless

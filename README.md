@@ -74,7 +74,9 @@ SDL_VIDEODRIVER=dummy cargo run --locked --package atrinik-client -- window
 
 Run `tools/validate.sh` for formatting, Clippy-as-errors, tests, architecture,
 provenance/parity, dependency/license/advisory, native-library, release, SBOM,
-and reproducibility gates.
+and reproducibility gates. On pull requests, `ADVISORY_BASE_REVISION` limits
+the advisory gate to advisories the change introduces; ones already on `main`
+are warnings there and fail the daily `Dependency advisories` workflow instead.
 
 Semantic-release creates an immutable version tag from `main` without exposing
 a partial GitHub release. A completion-triggered workflow resolves that exact
