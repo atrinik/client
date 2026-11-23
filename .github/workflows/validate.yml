@@ -15,13 +15,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
+      # Later steps use only local Git, so the token is not left in Git config.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # Modern pins read public GitHub release metadata. Authenticate only this
-      # step with the workflow's read-only token so the check does not depend on
-      # the shared 60/hour unauthenticated budget, and seal the sanitized
-      # documents for tools/validate.sh, whose Cargo steps never get the token.
+          persist-credentials: false
+      # Modern pins read public GitHub release metadata. Give the workflow's
+      # read-only token to this step only, so the check does not depend on the
+      # shared 60/hour unauthenticated budget. Write the sanitized documents
+      # (create-only) so the tools/validate.sh check makes no GitHub API calls.
       - name: Check released dependency readiness
         env:
           GITHUB_READ_TOKEN: ${{ github.token }}
@@ -56,6 +58,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Check released dependency readiness
         env:
           GITHUB_READ_TOKEN: ${{ github.token }}

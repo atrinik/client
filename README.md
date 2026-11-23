@@ -128,8 +128,10 @@ Configure repository variable `CRATE_DEPENDENCY_UPDATE_APP_ID` and secret
 needs contents and pull-request write plus metadata read on client and editor.
 The readiness gate reports missing exact registry packages before compilation;
 the reviewed protocol 0.1.0 and 0.2.0 historical checksums remain supported.
-`Client validation` reads that release metadata with the workflow's read-only
-token in the readiness step only; the Linux job seals the sanitized documents
-for `tools/validate.sh`, so its Cargo steps never receive the token.
+`Client validation` gives the workflow's read-only token only to its readiness
+step, and its checkouts do not persist Git credentials. The Linux job writes the
+sanitized metadata documents (create-only) for `tools/validate.sh`, whose own
+readiness check then makes no GitHub API calls. It still downloads release
+assets and checks crates.io.
 Client's ten internal crates have `publish = false`; application GitHub releases continue
 through their existing workflows.

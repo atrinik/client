@@ -132,7 +132,7 @@ def load_metadata(path, root, policy):
 
 
 def write_metadata(root, policy, path):
-    """Seal the sanitized public documents this host process fetched for offline reuse."""
+    """Write (create-only) the sanitized public API documents this host process fetched."""
     value = {'schema_version': 1, 'repository': policy['repository'],
              'base': run('git', 'rev-parse', 'HEAD', cwd=root), 'documents': _DOCUMENTS}
     data = json.dumps(value, sort_keys=True) + '\n'

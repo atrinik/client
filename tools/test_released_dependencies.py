@@ -1,6 +1,8 @@
 """Network-free registry, provenance and ownership failure fixtures."""
 # Copyright (c) 2026 Atrinik contributors. SPDX-License-Identifier: MIT
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -697,7 +699,7 @@ class MetadataIsolationTests(unittest.TestCase):
             with patch.object(updater, 'run', return_value='a' * 40):
                 updater.load_metadata(output, root, policy)
 
-    def test_ready_output_seals_fetched_documents_for_offline_readiness(self):
+    def test_ready_output_writes_fetched_documents_for_api_free_readiness(self):
         identity = {'id': 123, 'full_name': DEP['repository'], 'private': False,
                     'temp_clone_token': 'synthetic-private-clone-token'}
         with tempfile.TemporaryDirectory() as directory:
@@ -716,22 +718,26 @@ class MetadataIsolationTests(unittest.TestCase):
             with patch('sys.argv', argv), patch.dict(updater.os.environ, {'GITHUB_READ_TOKEN': 'fixture-read-token'}, clear=True), \
                     patch.object(updater, 'fetch', return_value=json.dumps(identity).encode()) as fetch, \
                     patch.object(updater, 'source', side_effect=source), patch.object(updater, 'lock_check'), \
-                    patch.object(updater, 'run', return_value='a' * 40):
+                    patch.object(updater, 'run', return_value='a' * 40), \
+                    contextlib.redirect_stdout(io.StringIO()) as stdout:
                 updater.main()
+            self.assertEqual(stdout.getvalue(), 'Dependency readiness policy verified.\n')
             self.assertEqual(fetch.call_count, 1)
-            data = output.read_text()
-            self.assertNotIn('fixture-read-token', data)
-            self.assertNotIn('synthetic-private-clone-token', data)
+            sanitized = {'id': 123, 'full_name': DEP['repository'], 'private': False}
+            self.assertEqual(json.loads(output.read_text()), {
+                'schema_version': 1, 'repository': 'atrinik/client', 'base': 'a' * 40,
+                'documents': {'https://api.github.com/repos/' + DEP['repository']: sanitized}})
             def offline(dependency, version):
                 return dict(record, identity=updater.document('https://api.github.com/repos/' + dependency['repository']))
             with patch('sys.argv', ['updater', 'ready', '--root', str(root)]), \
                     patch.dict(updater.os.environ, {'CRATE_RELEASE_METADATA_CACHE': str(output)}, clear=True), \
                     patch.object(updater, 'fetch') as network, patch.object(updater, 'source', side_effect=offline), \
-                    patch.object(updater, 'lock_check') as lock_check, patch.object(updater, 'run', return_value='a' * 40):
+                    patch.object(updater, 'lock_check') as lock_check, patch.object(updater, 'run', return_value='a' * 40), \
+                    contextlib.redirect_stdout(io.StringIO()) as stdout:
                 updater.main()
+            self.assertEqual(stdout.getvalue(), 'Dependency readiness policy verified.\n')
             network.assert_not_called()
-            self.assertEqual(lock_check.call_args.args[1][NAME]['identity'],
-                             {'id': 123, 'full_name': DEP['repository'], 'private': False})
+            self.assertEqual(lock_check.call_args.args[1][NAME]['identity'], sanitized)
             with patch('sys.argv', argv + ['--metadata-cache', str(output)]), patch.dict(updater.os.environ, {}, clear=True), \
                     patch.object(updater, 'run', return_value='a' * 40), self.assertRaisesRegex(ValueError, 'fresh host verification'):
                 updater.main()
