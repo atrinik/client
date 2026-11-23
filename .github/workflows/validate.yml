@@ -18,8 +18,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Modern pins read public GitHub release metadata. Authenticate only this
+      # step with the workflow's read-only token so the check does not depend on
+      # the shared 60/hour unauthenticated budget, and seal the sanitized
+      # documents for tools/validate.sh, whose Cargo steps never get the token.
       - name: Check released dependency readiness
-        run: python3 tools/released_dependencies.py ready --root .
+        env:
+          GITHUB_READ_TOKEN: ${{ github.token }}
+        run: python3 tools/released_dependencies.py ready --root . --output "${RUNNER_TEMP}/release-metadata.json"
       - name: Install Linux native build dependencies
         run: tools/install-linux-native-deps.sh
       - name: Install pinned Rust quality tools
@@ -42,6 +48,7 @@ jobs:
       - run: tools/validate.sh
         env:
           ADVISORY_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
+          CRATE_RELEASE_METADATA_CACHE: ${{ runner.temp }}/release-metadata.json
 
   windows:
     name: Windows build and tests
@@ -50,6 +57,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check released dependency readiness
+        env:
+          GITHUB_READ_TOKEN: ${{ github.token }}
         run: python tools/released_dependencies.py ready --root .
       - run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
       - run: cargo test --locked --workspace --all-targets

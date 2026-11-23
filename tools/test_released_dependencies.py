@@ -697,6 +697,45 @@ class MetadataIsolationTests(unittest.TestCase):
             with patch.object(updater, 'run', return_value='a' * 40):
                 updater.load_metadata(output, root, policy)
 
+    def test_ready_output_seals_fetched_documents_for_offline_readiness(self):
+        identity = {'id': 123, 'full_name': DEP['repository'], 'private': False,
+                    'temp_clone_token': 'synthetic-private-clone-token'}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy = {'schema_version': 1, 'repository': 'atrinik/client', 'dependencies': [DEP]}
+            (root / 'policy').mkdir()
+            (root / 'policy/released-dependencies.json').write_text(json.dumps(policy))
+            (root / 'Cargo.toml').write_text('[workspace.dependencies]\natrinik-protocol = "=0.2.1"\n')
+            output = root / 'metadata.json'
+            record = {'name': NAME, 'version': '0.2.1', 'sha256': SHA}
+            def source(dependency, version):
+                self.assertEqual(version, '0.2.1')
+                updater.document('https://api.github.com/repos/' + dependency['repository'])
+                return record
+            argv = ['updater', 'ready', '--root', str(root), '--output', str(output)]
+            with patch('sys.argv', argv), patch.dict(updater.os.environ, {'GITHUB_READ_TOKEN': 'fixture-read-token'}, clear=True), \
+                    patch.object(updater, 'fetch', return_value=json.dumps(identity).encode()) as fetch, \
+                    patch.object(updater, 'source', side_effect=source), patch.object(updater, 'lock_check'), \
+                    patch.object(updater, 'run', return_value='a' * 40):
+                updater.main()
+            self.assertEqual(fetch.call_count, 1)
+            data = output.read_text()
+            self.assertNotIn('fixture-read-token', data)
+            self.assertNotIn('synthetic-private-clone-token', data)
+            def offline(dependency, version):
+                return dict(record, identity=updater.document('https://api.github.com/repos/' + dependency['repository']))
+            with patch('sys.argv', ['updater', 'ready', '--root', str(root)]), \
+                    patch.dict(updater.os.environ, {'CRATE_RELEASE_METADATA_CACHE': str(output)}, clear=True), \
+                    patch.object(updater, 'fetch') as network, patch.object(updater, 'source', side_effect=offline), \
+                    patch.object(updater, 'lock_check') as lock_check, patch.object(updater, 'run', return_value='a' * 40):
+                updater.main()
+            network.assert_not_called()
+            self.assertEqual(lock_check.call_args.args[1][NAME]['identity'],
+                             {'id': 123, 'full_name': DEP['repository'], 'private': False})
+            with patch('sys.argv', argv + ['--metadata-cache', str(output)]), patch.dict(updater.os.environ, {}, clear=True), \
+                    patch.object(updater, 'run', return_value='a' * 40), self.assertRaisesRegex(ValueError, 'fresh host verification'):
+                updater.main()
+
     def test_draft_sanitization_preserves_pagination_cardinality(self):
         drafts = [{'draft': True, 'body': 'private draft content'}] * 30
         identity = {'id': DEP['repository_id'], 'full_name': DEP['repository'], 'private': False}
