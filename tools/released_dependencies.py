@@ -131,6 +131,16 @@ def load_metadata(path, root, policy):
     _OFFLINE_DOCUMENTS = True
 
 
+def write_metadata(root, policy, path):
+    """Write (create-only) the sanitized public API documents this host process fetched."""
+    value = {'schema_version': 1, 'repository': policy['repository'],
+             'base': run('git', 'rev-parse', 'HEAD', cwd=root), 'documents': _DOCUMENTS}
+    data = json.dumps(value, sort_keys=True) + '\n'
+    require(len(data.encode()) <= MAX_METADATA_BYTES, 'metadata cache exceeds bound')
+    with path.open('x') as output:
+        output.write(data)
+
+
 def exact_dependencies(root, policy):
     for config in (root / '.cargo/config', root / '.cargo/config.toml'):
         if config.exists():
@@ -599,6 +609,7 @@ def main():
     require(policy['schema_version'] == 1, 'unsupported dependency policy')
     if args.metadata_cache is not None:
         require(args.command not in {'metadata', 'publish'}, 'publication requires fresh host metadata verification')
+        require(args.command != 'ready' or args.output is None, 'readiness metadata output requires fresh host verification')
         load_metadata(args.metadata_cache, root, policy)
     if args.command == 'publish':
         publish(root, args.output, policy)
@@ -611,12 +622,7 @@ def main():
         exact_dependencies(root, policy)
         for dep in policy['dependencies']:
             source(dep)
-        value = {'schema_version': 1, 'repository': policy['repository'],
-                 'base': run('git', 'rev-parse', 'HEAD', cwd=root), 'documents': _DOCUMENTS}
-        data = json.dumps(value, sort_keys=True) + '\n'
-        require(len(data.encode()) <= MAX_METADATA_BYTES, 'metadata cache exceeds bound')
-        with args.output.open('x') as output:
-            output.write(data)
+        write_metadata(root, policy, args.output)
         return
     if args.command == 'verify-lock':
         verify_lock(root, args.output, policy)
@@ -634,6 +640,8 @@ def main():
         return
     if args.command == 'ready':
         lock_check(root, records)
+        if args.output is not None:
+            write_metadata(root, policy, args.output)
         print('Dependency readiness policy verified.')
         return
     require(args.output is not None, 'prepare requires --output')
